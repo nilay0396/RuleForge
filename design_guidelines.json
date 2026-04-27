@@ -1,0 +1,136 @@
+{
+  "project": "RuleForge Chess",
+  "theme": "dark",
+  "archetype": "Archetype 5: Jewel & Luxury",
+  "design_philosophy": "Premium, minimal, and deeply atmospheric. A mix of classic chess heritage with modern glowing neon accents to signify new rules. The interface should feel like an elite club mixed with an esports command center.",
+  "typography": {
+    "heading_font": "Cabinet Grotesk",
+    "body_font": "Manrope",
+    "mono_font": "JetBrains Mono",
+    "scale": {
+      "h1": "text-4xl sm:text-5xl tracking-tight font-black",
+      "h2": "text-2xl sm:text-3xl tracking-tight font-bold",
+      "h3": "text-xl sm:text-2xl tracking-tight font-semibold",
+      "h4": "text-lg sm:text-xl font-medium",
+      "body": "text-base leading-relaxed",
+      "small": "text-sm",
+      "overline": "text-xs tracking-[0.2em] uppercase font-bold"
+    }
+  },
+  "colors": {
+    "background": {
+      "app": "#09090B",
+      "surface": "#121214",
+      "elevated": "#1A1A1E",
+      "glass": "rgba(18, 18, 20, 0.75)"
+    },
+    "text": {
+      "primary": "#FAFAFA",
+      "secondary": "#A1A1AA",
+      "disabled": "#52525B",
+      "inverse": "#09090B"
+    },
+    "border": {
+      "default": "#27272A",
+      "focus": "#EAB308"
+    },
+    "chessboard": {
+      "light_square": "#D4D4D8",
+      "dark_square": "#3F3F46",
+      "highlight_move": "rgba(234, 179, 8, 0.5)",
+      "last_move": "rgba(56, 189, 248, 0.3)",
+      "check_danger": "rgba(239, 68, 68, 0.7)"
+    },
+    "rule_variants": {
+      "classic": "#EAB308", 
+      "king_dash": "#06B6D4",
+      "power_pawns": "#EF4444",
+      "swap_move": "#10B981",
+      "fog_chess": "#8B5CF6",
+      "capture_boost": "#F97316"
+    }
+  },
+  "layout_and_spacing": {
+    "container_padding": "p-4 md:p-8",
+    "section_gap": "gap-8 md:gap-12",
+    "item_gap": "gap-4",
+    "corner_radius": {
+      "sm": "rounded-md",
+      "md": "rounded-xl",
+      "lg": "rounded-2xl",
+      "full": "rounded-full"
+    },
+    "grid_strategy": "Control Room Grid (Dense). Mode selectors should be visually distinct bento boxes."
+  },
+  "components": {
+    "buttons": {
+      "primary": "bg-yellow-500 text-black font-bold rounded-full px-6 py-3 flex-row justify-center items-center active:opacity-80",
+      "secondary": "bg-transparent border border-zinc-800 text-white rounded-full px-6 py-3 flex-row justify-center items-center active:bg-zinc-900",
+      "icon": "p-3 rounded-full bg-zinc-900 border border-zinc-800 active:bg-zinc-800"
+    },
+    "cards": {
+      "mode_card": "bg-zinc-900 border border-zinc-800 rounded-2xl p-5 relative overflow-hidden",
+      "stat_card": "bg-zinc-900/50 border border-zinc-800/50 rounded-xl p-4 flex-col items-center justify-center"
+    },
+    "modals": {
+      "rule_explanation": "bg-zinc-950/90 border border-zinc-800 rounded-3xl p-6 absolute bottom-0 w-full"
+    }
+  },
+  "media": {
+    "backgrounds": [
+      {
+        "url": "https://images.unsplash.com/photo-1770745559994-545619d3c3da?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAxODF8MHwxfHNlYXJjaHwzfHxwcmVtaXVtJTIwZGFyayUyMGFic3RyYWN0JTIwdGV4dHVyZXxlbnwwfHx8fDE3NzczMjgzNTR8MA&ixlib=rb-4.1.0&q=85",
+        "description": "Abstract dark background with wisps of smoke",
+        "category": "onboarding_bg"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1760224254117-7a40f7f03fe2?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAxODF8MHwxfHNlYXJjaHwxfHxwcmVtaXVtJTIwZGFyayUyMGFic3RyYWN0JTIwdGV4dHVyZXxlbnwwfHx8fDE3NzczMjgzNTR8MA&ixlib=rb-4.1.0&q=85",
+        "description": "Dark blue fabric with soft light reflections",
+        "category": "home_hero_bg"
+      }
+    ],
+    "game_thumbnails": [
+      {
+        "url": "https://images.pexels.com/photos/32424119/pexels-photo-32424119.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "Moody chess set with dramatic lighting",
+        "category": "mode_classic"
+      },
+      {
+        "url": "https://images.pexels.com/photos/6599577/pexels-photo-6599577.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "A 3D chessboard showcasing intricate metal and wooden pieces",
+        "category": "mode_ruleforge"
+      }
+    ],
+    "avatars": [
+      {
+        "url": "https://images.unsplash.com/photo-1740252117013-4fb21771e7ca?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzNTl8MHwxfHNlYXJjaHwxfHxtaW5pbWFsaXN0JTIwY2xlYW4lMjB1c2VyJTIwYXZhdGFyfGVufDB8fHx8MTc3NzMyODM2M3ww&ixlib=rb-4.1.0&q=85",
+        "description": "Cartoon avatar 1",
+        "category": "player_avatar"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1740252117012-bb53ad05e370?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzNTl8MHwxfHNlYXJjaHwyfHxtaW5pbWFsaXN0JTIwY2xlYW4lMjB1c2VyJTIwYXZhdGFyfGVufDB8fHx8MTc3NzMyODM2M3ww&ixlib=rb-4.1.0&q=85",
+        "description": "Cartoon avatar 2",
+        "category": "opponent_avatar"
+      }
+    ]
+  },
+  "motion_and_interactions": {
+    "piece_drag": "Scale slightly (1.1) and add a drop-shadow while dragging.",
+    "move_highlight": "Fade in yellow/cyan highlight pulse on valid squares.",
+    "rule_reveal": "Slide up modal from bottom with a spring damping effect.",
+    "check_alert": "Red screen flash border for 300ms, haptic feedback trigger."
+  },
+  "accessibility": {
+    "contrast": "Ensure white text on zinc-900 passes APCA contrast.",
+    "touch_targets": "Minimum 48x48px for all icon buttons and chessboard squares on mobile."
+  },
+  "instructions_to_main_agent": [
+    "CRITICAL: Include `data-testid` on all interactive UI elements (buttons, inputs, chessboard squares, mode cards).",
+    "Use Lucide-react-native for all icons.",
+    "Build standard React Native `.js` files with NativeWind tailwind classes, avoiding `.tsx` strictly.",
+    "Implement the 'Learn This Rule' modal with React Native Modal or Reanimated bottom sheet using glassmorphism.",
+    "Chess pieces should be rendered using high-quality SVG (react-native-svg) with clear contours, DO NOT use standard emojis.",
+    "The board squares must alternate correctly and respond cleanly to touch/press events for piece selection and movement.",
+    "For the daily challenge streak, use the 'classic' accent color (#EAB308) to display a fiery/glowing streak counter."
+  ]
+}
