@@ -1,0 +1,45 @@
+{
+  "summary": "RuleForge Chess full-stack end-to-end testing. Backend: all 24 pytest cases passed (100%). Frontend: onboarding->guest->home, rule cards, profile, daily, play (chessboard 64 squares + legal move), login, admin panel (4 tabs + create-rule form) — all verified. Fixed one backend bug (guest signup 500 caused by null-email collision on unique+sparse index) and re-verified.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "global", "issues": [
+        "Deprecation warnings in console: 'textShadow*' style props and 'pointerEvents' prop — cosmetic only, no functional impact.",
+        "Expo compatibility warning: @react-native-async-storage/async-storage@3.0.2 vs expected 2.2.0; react-native-svg@15.15.4 vs 15.12.1. App works but main agent may want to align versions via `npx expo install --check`."
+      ]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/conftest.py",
+    "/app/backend/tests/test_ruleforge_api.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "(Optional) Align Expo package versions to silence compatibility warnings.",
+    "(Optional) Replace deprecated textShadow* and pointerEvents usage in RN styles.",
+    "Rule-card testID rule-card-<key> is only on the wrapper View; the actual Play button is a child. If E1/QA wants 'tap the card' to be the nav interaction, either move testID onto the Play button or make the whole card Pressable. Currently the review spec was still met (play route opens with rule modal showing testIDs play-start and play-rule-info)."
+  ],
+  "critical_code_review_comments": [
+    "BUG (FIXED by test agent): POST /api/auth/guest failed with 500 on 2nd guest because guest docs were inserted with email: None and the unique+sparse index on email treats explicit null as a value. Changed guest_login to omit the email field entirely, switched the index to a partial filter (email: { $type: string }), and added startup cleanup that unsets pre-existing null emails.",
+    "Potential: record_match uses $inc on elo which can go negative on losses (allowed) but there is no floor; consider clamping to a minimum.",
+    "seed_admin updates password when .env changes (good) — matches auth playbook expectation. bcrypt hash format is $2b$ (correct).",
+    "CORS uses allow_origins=['*'] with allow_credentials=False — OK for bearer-token auth."
+  ],
+  "updated_files": [
+    "/app/backend/server.py (guest_login omits email; startup index cleanup + partial-filter unique index)",
+    "/app/backend/tests/conftest.py (new)",
+    "/app/backend/tests/test_ruleforge_api.py (new, 24 tests)"
+  ],
+  "success_rate": {"backend": "100% (24/24)", "frontend": "100% of spec flows verified"},
+  "seed_data_creation": "Backend seeds admin + test player + 4 default rules + 7 default quizzes on startup. Test runs created TEST_ users/rules/quizzes and cleaned them up.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Guest bug fix is critical — verify POST /api/auth/guest still works after any future refactor. Admin panel tabs: rules/daily/quizzes/users. Chessboard uses sq-<square> Pressables (tap-select, tap-target; no drag). Play route requires ?rule=<key>&ai=<level>. On fresh load it shows a rule explanation modal dismissed by testID play-start.",
+  "rca_of_issue": "Reproduction: call POST /api/auth/guest twice -> first succeeds, second 500s with DuplicateKeyError on email=null because the unique+sparse index only skips missing fields, not explicit nulls. Fix: (1) omit the email field for guest users, (2) replace the sparse index with a partial index filtered to string-typed emails, (3) unset null emails on startup for legacy docs. Verified by re-running backend suite + completing guest->home flow on frontend."
+}

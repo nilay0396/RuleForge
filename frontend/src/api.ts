@@ -1,0 +1,111 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+const BASE = process.env.EXPO_PUBLIC_BACKEND_URL;
+const TOKEN_KEY = 'rf_token';
+
+export async function getToken(): Promise<string | null> {
+  try {
+    return await AsyncStorage.getItem(TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export async function setToken(token: string | null) {
+  if (token) await AsyncStorage.setItem(TOKEN_KEY, token);
+  else await AsyncStorage.removeItem(TOKEN_KEY);
+}
+
+export type ApiError = { detail: string };
+
+async function request<T>(path: string, options: RequestInit = {}, auth = true): Promise<T> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...((options.headers as Record<string, string>) || {}),
+  };
+  if (auth) {
+    const token = await getToken();
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+  }
+  const res = await fetch(`${BASE}/api${path}`, { ...options, headers });
+  const text = await res.text();
+  let data: any = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = { detail: text };
+  }
+  if (!res.ok) {
+    const detail =
+      typeof data?.detail === 'string'
+        ? data.detail
+        : Array.isArray(data?.detail)
+        ? data.detail.map((e: any) => e?.msg || JSON.stringify(e)).join(', ')
+        : `Request failed (${res.status})`;
+    throw new Error(detail);
+  }
+  return data as T;
+}
+
+export const api = {
+  // Auth
+  login: (email: string, password: string) =>
+    request<{ token: string; user: any }>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    }, false),
+  register: (email: string, password: string, name: string) =>
+    request<{ token: string; user: any }>('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({ email, password, name }),
+    }, false),
+  guest: () => request<{ token: string; user: any }>('/auth/guest', { method: 'POST' }, false),
+  upgrade: (email: string, password: string, name: string) =>
+    request<{ token: string; user: any }>('/auth/upgrade', {
+      method: 'POST',
+      body: JSON.stringify({ email, password, name }),
+    }),
+  me: () => request<{ user: any }>('/auth/me'),
+  logout: () => request<{ ok: boolean }>('/auth/logout', { method: 'POST' }),
+
+  // Content
+  rules: () => request<{ rules: any[] }>('/rules', {}, false),
+  rule: (key: string) => request<{ rule: any; quizzes: any[] }>(`/rules/${key}`, {}, false),
+
+  // Matches
+  recordMatch: (body: any) =>
+    request<{ match: any; user: any }>('/matches', { method: 'POST', body: JSON.stringify(body) }),
+  myMatches: () => request<{ matches: any[] }>('/matches/me'),
+
+  // Daily
+  daily: () => request<{ challenge: any; completed: boolean }>('/daily'),
+  submitDaily: (moves_san: string[], completed: boolean) =>
+    request<{ ok: boolean; user: any; already_completed?: boolean }>('/daily/submit', {
+      method: 'POST',
+      body: JSON.stringify({ moves_san, completed }),
+    }),
+
+  // Leaderboard
+  leaderboard: () => request<{ leaderboard: any[] }>('/leaderboard', {}, false),
+
+  // Admin
+  adminCreateRule: (rule: any) =>
+    request<{ rule: any }>('/admin/rules', { method: 'POST', body: JSON.stringify(rule) }),
+  adminDeleteRule: (key: string) =>
+    request<{ deleted: number }>(`/admin/rules/${key}`, { method: 'DELETE' }),
+  adminSetDaily: (body: any) =>
+    request<{ challenge: any }>('/admin/daily', { method: 'POST', body: JSON.stringify(body) }),
+  adminCreateQuiz: (body: any) =>
+    request<{ quiz: any }>('/admin/quizzes', { method: 'POST', body: JSON.stringify(body) }),
+  adminDeleteQuiz: (id: string) =>
+    request<{ deleted: number }>(`/admin/quizzes/${id}`, { method: 'DELETE' }),
+  adminUsers: () => request<{ users: any[] }>('/admin/users'),
+
+  // Anti-cheat hook (optional usage)
+  validateMove: (fen: string, uci: string) =>
+    request<{ legal: boolean; san?: string; fen?: string; reason?: string }>(
+      '/move/validate',
+      { method: 'POST', body: JSON.stringify({ fen, uci }) },
+      false,
+    ),
+};

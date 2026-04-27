@@ -1,75 +1,825 @@
-from fastapi import FastAPI, APIRouter
-from dotenv import load_dotenv
-from starlette.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
-import os
-import logging
-from pathlib import Path
-from pydantic import BaseModel, Field
-from typing import List
-import uuid
-from datetime import datetime
+"""RuleForge Chess — FastAPI backend.
 
+Auth (JWT email/password + guest), rule variants, daily challenges,
+matches/XP/coins/elo/streaks/badges, leaderboard, quizzes, admin panel,
+and server-side anti-cheat move validation using python-chess.
+"""
+
+from dotenv import load_dotenv
+from pathlib import Path
 
 ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / '.env')
+load_dotenv(ROOT_DIR / ".env")
 
-# MongoDB connection
-mongo_url = os.environ['MONGO_URL']
+import os
+import logging
+import uuid
+import secrets
+from datetime import datetime, timezone, timedelta, date
+from typing import Any, Dict, List, Optional
+
+import bcrypt
+import chess as pychess
+import jwt
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, status
+from fastapi.middleware.cors import CORSMiddleware
+from motor.motor_asyncio import AsyncIOMotorClient
+from pydantic import BaseModel, EmailStr, Field
+
+# -----------------------------------------------------------------------------
+# Config & logging
+# -----------------------------------------------------------------------------
+JWT_ALGORITHM = "HS256"
+ACCESS_TOKEN_TTL_MIN = 60 * 24 * 7  # 7 days — keep simple for mobile
+DAILY_XP_BONUS = 50
+WIN_XP = 25
+DRAW_XP = 10
+LOSE_XP = 5
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s — %(message)s")
+logger = logging.getLogger("ruleforge")
+
+mongo_url = os.environ["MONGO_URL"]
 client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
-
-# Create the main app without a prefix
-app = FastAPI()
-
-# Create a router with the /api prefix
-api_router = APIRouter(prefix="/api")
+db = client[os.environ["DB_NAME"]]
 
 
-# Define Models
-class StatusCheck(BaseModel):
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    client_name: str
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+def jwt_secret() -> str:
+    return os.environ["JWT_SECRET"]
 
-class StatusCheckCreate(BaseModel):
-    client_name: str
 
-# Add your routes to the router instead of directly to app
-@api_router.get("/")
-async def root():
-    return {"message": "Hello World"}
+# -----------------------------------------------------------------------------
+# Helpers
+# -----------------------------------------------------------------------------
+def hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
-@api_router.post("/status", response_model=StatusCheck)
-async def create_status_check(input: StatusCheckCreate):
-    status_dict = input.dict()
-    status_obj = StatusCheck(**status_dict)
-    _ = await db.status_checks.insert_one(status_obj.dict())
-    return status_obj
 
-@api_router.get("/status", response_model=List[StatusCheck])
-async def get_status_checks():
-    status_checks = await db.status_checks.find().to_list(1000)
-    return [StatusCheck(**status_check) for status_check in status_checks]
+def verify_password(plain: str, hashed: str) -> bool:
+    try:
+        return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
+    except Exception:
+        return False
 
-# Include the router in the main app
-app.include_router(api_router)
 
+def create_token(user_id: str, email: str, role: str) -> str:
+    payload = {
+        "sub": user_id,
+        "email": email,
+        "role": role,
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_TTL_MIN),
+        "iat": datetime.now(timezone.utc),
+    }
+    return jwt.encode(payload, jwt_secret(), algorithm=JWT_ALGORITHM)
+
+
+def public_user(user: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a JSON-serializable view of a user, dropping mongo _id and password."""
+    return {
+        "id": user["id"],
+        "email": user.get("email"),
+        "name": user.get("name", "Player"),
+        "role": user.get("role", "user"),
+        "is_guest": user.get("is_guest", False),
+        "xp": user.get("xp", 0),
+        "coins": user.get("coins", 0),
+        "elo": user.get("elo", 1000),
+        "streak": user.get("streak", 0),
+        "longest_streak": user.get("longest_streak", 0),
+        "badges": user.get("badges", []),
+        "wins": user.get("wins", 0),
+        "losses": user.get("losses", 0),
+        "draws": user.get("draws", 0),
+        "premium": user.get("premium", False),
+        "avatar": user.get("avatar"),
+        "created_at": user.get("created_at"),
+    }
+
+
+# -----------------------------------------------------------------------------
+# Models
+# -----------------------------------------------------------------------------
+class RegisterIn(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=6, max_length=128)
+    name: str = Field(min_length=1, max_length=40)
+
+
+class LoginIn(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class UpgradeIn(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=6, max_length=128)
+    name: str = Field(min_length=1, max_length=40)
+
+
+class MatchIn(BaseModel):
+    mode: str  # 'classic' | 'king_dash' | 'power_pawns' | 'swap_move' | 'daily'
+    rule_key: Optional[str] = None
+    result: str  # 'win' | 'loss' | 'draw'
+    moves_san: List[str] = []
+    final_fen: Optional[str] = None
+    duration_seconds: int = 0
+    ai_level: Optional[int] = None
+
+
+class DailySubmitIn(BaseModel):
+    moves_san: List[str]
+    completed: bool
+
+
+class RuleIn(BaseModel):
+    key: str
+    name: str
+    description: str
+    color: str = "#EAB308"
+    icon: str = "crown"
+    long_explanation: str = ""
+    examples: List[str] = []
+    premium: bool = False
+
+
+class DailyChallengeIn(BaseModel):
+    rule_key: str
+    fen: str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+    target: str = "Win or draw against the bot"
+    description: str = ""
+
+
+class QuizIn(BaseModel):
+    rule_key: str
+    question: str
+    options: List[str]
+    correct_index: int
+    explanation: str = ""
+
+
+class MoveValidateIn(BaseModel):
+    fen: str
+    uci: str  # like 'e2e4' or 'e7e8q'
+
+
+# -----------------------------------------------------------------------------
+# App + Router
+# -----------------------------------------------------------------------------
+app = FastAPI(title="RuleForge Chess API")
+api = APIRouter(prefix="/api")
+
+
+# CORS — frontend uses fetch with bearer tokens (no credentials), so wildcard works.
 app.add_middleware(
     CORSMiddleware,
-    allow_credentials=True,
     allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+
+# -----------------------------------------------------------------------------
+# Auth dependency
+# -----------------------------------------------------------------------------
+async def current_user(request: Request) -> Dict[str, Any]:
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    token = auth[7:]
+    try:
+        payload = jwt.decode(token, jwt_secret(), algorithms=[JWT_ALGORITHM])
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0})
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    return user
+
+
+async def admin_user(user: Dict[str, Any] = Depends(current_user)) -> Dict[str, Any]:
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    return user
+
+
+# -----------------------------------------------------------------------------
+# Auth Endpoints
+# -----------------------------------------------------------------------------
+@api.post("/auth/register")
+async def register(payload: RegisterIn):
+    email = payload.email.lower().strip()
+    existing = await db.users.find_one({"email": email})
+    if existing:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    user_id = str(uuid.uuid4())
+    user_doc = {
+        "id": user_id,
+        "email": email,
+        "password_hash": hash_password(payload.password),
+        "name": payload.name.strip(),
+        "role": "user",
+        "is_guest": False,
+        "xp": 0,
+        "coins": 100,
+        "elo": 1000,
+        "streak": 0,
+        "longest_streak": 0,
+        "badges": [],
+        "wins": 0,
+        "losses": 0,
+        "draws": 0,
+        "premium": False,
+        "avatar": None,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.users.insert_one(user_doc)
+    token = create_token(user_id, email, "user")
+    return {"token": token, "user": public_user(user_doc)}
+
+
+@api.post("/auth/login")
+async def login(payload: LoginIn):
+    email = payload.email.lower().strip()
+    user = await db.users.find_one({"email": email}, {"_id": 0})
+    if not user or not user.get("password_hash") or not verify_password(payload.password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    token = create_token(user["id"], email, user.get("role", "user"))
+    return {"token": token, "user": public_user(user)}
+
+
+@api.post("/auth/guest")
+async def guest_login():
+    user_id = str(uuid.uuid4())
+    name = f"Guest-{user_id[:6].upper()}"
+    # NOTE: intentionally omit the `email` field for guests. The unique index on
+    # `email` uses a partial filter so documents without the field are ignored.
+    user_doc = {
+        "id": user_id,
+        "password_hash": None,
+        "name": name,
+        "role": "user",
+        "is_guest": True,
+        "xp": 0,
+        "coins": 50,
+        "elo": 1000,
+        "streak": 0,
+        "longest_streak": 0,
+        "badges": [],
+        "wins": 0,
+        "losses": 0,
+        "draws": 0,
+        "premium": False,
+        "avatar": None,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.users.insert_one(user_doc)
+    token = create_token(user_id, "", "user")
+    return {"token": token, "user": public_user(user_doc)}
+
+
+@api.post("/auth/upgrade")
+async def upgrade_guest(payload: UpgradeIn, user: Dict[str, Any] = Depends(current_user)):
+    if not user.get("is_guest"):
+        raise HTTPException(status_code=400, detail="Account is already a full account")
+    email = payload.email.lower().strip()
+    if await db.users.find_one({"email": email}):
+        raise HTTPException(status_code=400, detail="Email already registered")
+    await db.users.update_one(
+        {"id": user["id"]},
+        {"$set": {
+            "email": email,
+            "password_hash": hash_password(payload.password),
+            "name": payload.name.strip(),
+            "is_guest": False,
+        }},
+    )
+    updated = await db.users.find_one({"id": user["id"]}, {"_id": 0})
+    token = create_token(updated["id"], email, updated.get("role", "user"))
+    return {"token": token, "user": public_user(updated)}
+
+
+@api.get("/auth/me")
+async def me(user: Dict[str, Any] = Depends(current_user)):
+    return {"user": public_user(user)}
+
+
+@api.post("/auth/logout")
+async def logout(user: Dict[str, Any] = Depends(current_user)):
+    return {"ok": True}
+
+
+# -----------------------------------------------------------------------------
+# Rules
+# -----------------------------------------------------------------------------
+@api.get("/rules")
+async def list_rules():
+    rules = await db.rules.find({}, {"_id": 0}).to_list(200)
+    return {"rules": rules}
+
+
+@api.get("/rules/{key}")
+async def get_rule(key: str):
+    rule = await db.rules.find_one({"key": key}, {"_id": 0})
+    if not rule:
+        raise HTTPException(status_code=404, detail="Rule not found")
+    quizzes = await db.quizzes.find({"rule_key": key}, {"_id": 0}).to_list(50)
+    return {"rule": rule, "quizzes": quizzes}
+
+
+# -----------------------------------------------------------------------------
+# Matches & XP
+# -----------------------------------------------------------------------------
+def _award_for_result(result: str) -> int:
+    return {"win": WIN_XP, "draw": DRAW_XP, "loss": LOSE_XP}.get(result, 0)
+
+
+def _elo_delta(result: str, ai_level: Optional[int]) -> int:
+    base = {"win": 12, "draw": 2, "loss": -8}.get(result, 0)
+    if ai_level is not None:
+        base += (ai_level - 2) * 2  # bonus for harder bots
+    return base
+
+
+@api.post("/matches")
+async def record_match(payload: MatchIn, user: Dict[str, Any] = Depends(current_user)):
+    match_id = str(uuid.uuid4())
+    xp_gain = _award_for_result(payload.result)
+    coin_gain = 10 if payload.result == "win" else 2
+    elo_delta = _elo_delta(payload.result, payload.ai_level)
+    match_doc = {
+        "id": match_id,
+        "user_id": user["id"],
+        "mode": payload.mode,
+        "rule_key": payload.rule_key,
+        "result": payload.result,
+        "moves_san": payload.moves_san,
+        "final_fen": payload.final_fen,
+        "duration_seconds": payload.duration_seconds,
+        "ai_level": payload.ai_level,
+        "xp_gain": xp_gain,
+        "coin_gain": coin_gain,
+        "elo_delta": elo_delta,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.matches.insert_one(match_doc)
+
+    # Update user stats
+    result_field = {"win": "wins", "loss": "losses", "draw": "draws"}.get(payload.result, "draws")
+    inc = {
+        "xp": xp_gain,
+        "coins": coin_gain,
+        "elo": elo_delta,
+        result_field: 1,
+    }
+    await db.users.update_one({"id": user["id"]}, {"$inc": inc})
+
+    # Badge logic
+    user2 = await db.users.find_one({"id": user["id"]}, {"_id": 0})
+    new_badges: List[str] = list(user2.get("badges", []))
+    if user2.get("wins", 0) >= 1 and "first_win" not in new_badges:
+        new_badges.append("first_win")
+    if user2.get("wins", 0) >= 10 and "ten_wins" not in new_badges:
+        new_badges.append("ten_wins")
+    if payload.mode != "classic" and "rule_breaker" not in new_badges:
+        new_badges.append("rule_breaker")
+    if new_badges != user2.get("badges", []):
+        await db.users.update_one({"id": user["id"]}, {"$set": {"badges": new_badges}})
+
+    final_user = await db.users.find_one({"id": user["id"]}, {"_id": 0})
+    return {"match": {k: v for k, v in match_doc.items() if k != "_id"}, "user": public_user(final_user)}
+
+
+@api.get("/matches/me")
+async def my_matches(user: Dict[str, Any] = Depends(current_user)):
+    matches = await db.matches.find({"user_id": user["id"]}, {"_id": 0}).sort("created_at", -1).to_list(50)
+    return {"matches": matches}
+
+
+# -----------------------------------------------------------------------------
+# Daily challenge
+# -----------------------------------------------------------------------------
+def _today_key() -> str:
+    return date.today().isoformat()
+
+
+@api.get("/daily")
+async def get_daily(user: Dict[str, Any] = Depends(current_user)):
+    today = _today_key()
+    challenge = await db.daily.find_one({"date": today}, {"_id": 0})
+    if not challenge:
+        # Auto-rotate among rules so there's always one available.
+        rules = await db.rules.find({}, {"_id": 0}).to_list(50)
+        if not rules:
+            raise HTTPException(status_code=500, detail="No rules configured")
+        idx = (date.today().toordinal()) % len(rules)
+        rule = rules[idx]
+        challenge = {
+            "id": str(uuid.uuid4()),
+            "date": today,
+            "rule_key": rule["key"],
+            "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+            "target": f"Defeat the Bronze bot using the {rule['name']} rule",
+            "description": rule.get("description", ""),
+            "auto_generated": True,
+        }
+        await db.daily.insert_one(dict(challenge))
+        challenge.pop("_id", None)
+
+    completion = await db.daily_completions.find_one(
+        {"user_id": user["id"], "date": today}, {"_id": 0}
+    )
+    return {"challenge": challenge, "completed": bool(completion and completion.get("completed"))}
+
+
+@api.post("/daily/submit")
+async def submit_daily(payload: DailySubmitIn, user: Dict[str, Any] = Depends(current_user)):
+    today = _today_key()
+    existing = await db.daily_completions.find_one({"user_id": user["id"], "date": today})
+    if existing and existing.get("completed"):
+        return {"already_completed": True, "user": public_user(user)}
+
+    record = {
+        "id": str(uuid.uuid4()),
+        "user_id": user["id"],
+        "date": today,
+        "moves_san": payload.moves_san,
+        "completed": payload.completed,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if existing:
+        await db.daily_completions.update_one({"id": existing["id"]}, {"$set": record})
+    else:
+        await db.daily_completions.insert_one(record)
+
+    if payload.completed:
+        # Streak: did user complete yesterday too?
+        yesterday = (date.today() - timedelta(days=1)).isoformat()
+        had_yesterday = await db.daily_completions.find_one(
+            {"user_id": user["id"], "date": yesterday, "completed": True}
+        )
+        new_streak = (user.get("streak", 0) + 1) if had_yesterday else 1
+        longest = max(user.get("longest_streak", 0), new_streak)
+        badges = list(user.get("badges", []))
+        if new_streak >= 3 and "streak_3" not in badges:
+            badges.append("streak_3")
+        if new_streak >= 7 and "streak_7" not in badges:
+            badges.append("streak_7")
+        await db.users.update_one(
+            {"id": user["id"]},
+            {
+                "$inc": {"xp": DAILY_XP_BONUS, "coins": 20},
+                "$set": {"streak": new_streak, "longest_streak": longest, "badges": badges},
+            },
+        )
+
+    final = await db.users.find_one({"id": user["id"]}, {"_id": 0})
+    return {"ok": True, "user": public_user(final)}
+
+
+# -----------------------------------------------------------------------------
+# Leaderboard
+# -----------------------------------------------------------------------------
+@api.get("/leaderboard")
+async def leaderboard():
+    top = await db.users.find(
+        {"is_guest": False},
+        {"_id": 0, "id": 1, "name": 1, "elo": 1, "xp": 1, "wins": 1, "badges": 1},
+    ).sort([("elo", -1), ("xp", -1)]).to_list(50)
+    return {"leaderboard": top}
+
+
+# -----------------------------------------------------------------------------
+# Anti-cheat: server-side move validation (classic chess rules)
+# -----------------------------------------------------------------------------
+@api.post("/move/validate")
+async def validate_move(payload: MoveValidateIn):
+    try:
+        board = pychess.Board(payload.fen)
+        move = pychess.Move.from_uci(payload.uci)
+    except Exception as e:
+        return {"legal": False, "reason": f"parse error: {e}"}
+    if move not in board.legal_moves:
+        return {"legal": False, "reason": "not a legal classic move"}
+    san = board.san(move)
+    board.push(move)
+    return {
+        "legal": True,
+        "san": san,
+        "fen": board.fen(),
+        "is_check": board.is_check(),
+        "is_checkmate": board.is_checkmate(),
+        "is_stalemate": board.is_stalemate(),
+    }
+
+
+# -----------------------------------------------------------------------------
+# Admin
+# -----------------------------------------------------------------------------
+@api.post("/admin/rules")
+async def admin_create_rule(payload: RuleIn, _: Dict[str, Any] = Depends(admin_user)):
+    existing = await db.rules.find_one({"key": payload.key})
+    rule = payload.dict()
+    rule["id"] = existing["id"] if existing else str(uuid.uuid4())
+    rule["updated_at"] = datetime.now(timezone.utc).isoformat()
+    await db.rules.update_one({"key": payload.key}, {"$set": rule}, upsert=True)
+    return {"rule": rule}
+
+
+@api.delete("/admin/rules/{key}")
+async def admin_delete_rule(key: str, _: Dict[str, Any] = Depends(admin_user)):
+    res = await db.rules.delete_one({"key": key})
+    return {"deleted": res.deleted_count}
+
+
+@api.post("/admin/daily")
+async def admin_set_daily(payload: DailyChallengeIn, _: Dict[str, Any] = Depends(admin_user)):
+    today = _today_key()
+    doc = {
+        "id": str(uuid.uuid4()),
+        "date": today,
+        **payload.dict(),
+        "auto_generated": False,
+    }
+    await db.daily.update_one({"date": today}, {"$set": doc}, upsert=True)
+    doc.pop("_id", None)
+    return {"challenge": doc}
+
+
+@api.post("/admin/quizzes")
+async def admin_create_quiz(payload: QuizIn, _: Dict[str, Any] = Depends(admin_user)):
+    quiz = payload.dict()
+    quiz["id"] = str(uuid.uuid4())
+    quiz["created_at"] = datetime.now(timezone.utc).isoformat()
+    await db.quizzes.insert_one(dict(quiz))
+    quiz.pop("_id", None)
+    return {"quiz": quiz}
+
+
+@api.delete("/admin/quizzes/{quiz_id}")
+async def admin_delete_quiz(quiz_id: str, _: Dict[str, Any] = Depends(admin_user)):
+    res = await db.quizzes.delete_one({"id": quiz_id})
+    return {"deleted": res.deleted_count}
+
+
+@api.get("/admin/users")
+async def admin_users(_: Dict[str, Any] = Depends(admin_user)):
+    users = await db.users.find({}, {"_id": 0, "password_hash": 0}).sort("created_at", -1).to_list(200)
+    return {"users": users}
+
+
+@api.get("/")
+async def root():
+    return {"app": "RuleForge Chess", "ok": True}
+
+
+# -----------------------------------------------------------------------------
+# Startup: indexes + seeding
+# -----------------------------------------------------------------------------
+DEFAULT_RULES = [
+    {
+        "key": "classic",
+        "name": "Classic Chess",
+        "description": "The pure, timeless game. No twists, just strategy.",
+        "color": "#EAB308",
+        "icon": "crown",
+        "long_explanation": (
+            "Classic chess follows the standard FIDE rules. White moves first, the "
+            "objective is to checkmate the opponent's king. All special moves apply: "
+            "castling, en passant, and pawn promotion."
+        ),
+        "examples": [
+            "Develop knights and bishops in the opening.",
+            "Castle early to keep your king safe.",
+            "Look for tactics: forks, pins, skewers.",
+        ],
+        "premium": False,
+    },
+    {
+        "key": "king_dash",
+        "name": "King Dash",
+        "description": "Once per game, your King may sprint two squares in any direction.",
+        "color": "#06B6D4",
+        "icon": "zap",
+        "long_explanation": (
+            "Your King has one extra power move per game: it can leap exactly two "
+            "squares horizontally, vertically, or diagonally — provided the path and "
+            "target square are not under attack and the target is empty or holds an "
+            "enemy piece. Use it to escape danger, race to a key square, or surprise "
+            "an attacker."
+        ),
+        "examples": [
+            "Escape a pin by dashing two squares sideways.",
+            "Activate your king in an endgame instantly.",
+            "Save a Dash for a critical moment — once it's used, it's gone.",
+        ],
+        "premium": False,
+    },
+    {
+        "key": "power_pawns",
+        "name": "Power Pawns",
+        "description": "Pawns on rank 5+ may also slide one square sideways.",
+        "color": "#EF4444",
+        "icon": "flame",
+        "long_explanation": (
+            "Pawns are weak no more. Once a pawn reaches its 5th rank (rank 5 for "
+            "White, rank 4 for Black), it can move one square sideways to an empty "
+            "square in addition to its normal moves. Sideways moves do not capture."
+        ),
+        "examples": [
+            "Slide a power pawn to support an attack.",
+            "Reposition for a stronger promotion path.",
+            "Power pawns make passed pawns extra dangerous.",
+        ],
+        "premium": False,
+    },
+    {
+        "key": "swap_move",
+        "name": "Swap Move",
+        "description": "Once per game, swap any two of your own non-king pieces.",
+        "color": "#10B981",
+        "icon": "shuffle",
+        "long_explanation": (
+            "Once per game, on your turn, you may use your Swap instead of moving. "
+            "Choose any two of your own pieces (not the King) and swap their squares. "
+            "After the swap, your turn ends. The swap counts as your move."
+        ),
+        "examples": [
+            "Swap a stuck bishop with an active knight.",
+            "Move a defender to your weak king side.",
+            "Save it for a tactical, game-changing moment.",
+        ],
+        "premium": False,
+    },
+]
+
+DEFAULT_QUIZZES = [
+    {
+        "rule_key": "king_dash",
+        "question": "How many times can the King Dash be used per game?",
+        "options": ["Once", "Twice", "Unlimited", "Once per turn"],
+        "correct_index": 0,
+        "explanation": "King Dash is a one-time power move per game per side.",
+    },
+    {
+        "rule_key": "king_dash",
+        "question": "Can the King Dash through a square that is attacked?",
+        "options": ["Yes", "No"],
+        "correct_index": 1,
+        "explanation": "Like castling, the king cannot move through attacked squares.",
+    },
+    {
+        "rule_key": "power_pawns",
+        "question": "From which rank does a White pawn gain sideways movement?",
+        "options": ["Rank 3", "Rank 4", "Rank 5", "Rank 6"],
+        "correct_index": 2,
+        "explanation": "Pawns gain sideways movement when they reach their 5th rank.",
+    },
+    {
+        "rule_key": "power_pawns",
+        "question": "Can a power pawn capture sideways?",
+        "options": ["Yes", "No"],
+        "correct_index": 1,
+        "explanation": "Sideways pawn moves are non-capturing, only to empty squares.",
+    },
+    {
+        "rule_key": "swap_move",
+        "question": "Can the King be part of a Swap?",
+        "options": ["Yes", "No"],
+        "correct_index": 1,
+        "explanation": "The King cannot be swapped — it would be too disruptive.",
+    },
+    {
+        "rule_key": "swap_move",
+        "question": "After a Swap, what happens?",
+        "options": [
+            "You get another move",
+            "Your turn ends",
+            "Opponent skips a turn",
+            "Random rule triggers",
+        ],
+        "correct_index": 1,
+        "explanation": "Using your Swap counts as your move — the turn passes.",
+    },
+    {
+        "rule_key": "classic",
+        "question": "Which side moves first in classic chess?",
+        "options": ["Black", "White", "Random", "Higher Elo"],
+        "correct_index": 1,
+        "explanation": "White always moves first in standard chess.",
+    },
+]
+
+
+async def seed_admin():
+    admin_email = os.environ.get("ADMIN_EMAIL", "admin@ruleforge.app").lower()
+    admin_password = os.environ.get("ADMIN_PASSWORD", "Admin@1234")
+    existing = await db.users.find_one({"email": admin_email})
+    if not existing:
+        await db.users.insert_one({
+            "id": str(uuid.uuid4()),
+            "email": admin_email,
+            "password_hash": hash_password(admin_password),
+            "name": "RuleForge Admin",
+            "role": "admin",
+            "is_guest": False,
+            "xp": 0, "coins": 0, "elo": 1200,
+            "streak": 0, "longest_streak": 0,
+            "badges": ["founder"],
+            "wins": 0, "losses": 0, "draws": 0,
+            "premium": True,
+            "avatar": None,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+        logger.info("Seeded admin %s", admin_email)
+    else:
+        # Keep password in sync with .env so resets work even after env edits.
+        if not verify_password(admin_password, existing.get("password_hash", "")):
+            await db.users.update_one(
+                {"email": admin_email},
+                {"$set": {"password_hash": hash_password(admin_password), "role": "admin"}},
+            )
+            logger.info("Updated admin password for %s", admin_email)
+
+
+async def seed_test_user():
+    email = "player1@ruleforge.app"
+    if not await db.users.find_one({"email": email}):
+        await db.users.insert_one({
+            "id": str(uuid.uuid4()),
+            "email": email,
+            "password_hash": hash_password("Player@1234"),
+            "name": "Test Player",
+            "role": "user",
+            "is_guest": False,
+            "xp": 0, "coins": 100, "elo": 1000,
+            "streak": 0, "longest_streak": 0, "badges": [],
+            "wins": 0, "losses": 0, "draws": 0,
+            "premium": False, "avatar": None,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+        logger.info("Seeded test user %s", email)
+
+
+async def seed_rules():
+    for rule in DEFAULT_RULES:
+        existing = await db.rules.find_one({"key": rule["key"]})
+        if not existing:
+            doc = dict(rule)
+            doc["id"] = str(uuid.uuid4())
+            doc["updated_at"] = datetime.now(timezone.utc).isoformat()
+            await db.rules.insert_one(doc)
+
+
+async def seed_quizzes():
+    if await db.quizzes.count_documents({}) == 0:
+        docs = []
+        for q in DEFAULT_QUIZZES:
+            d = dict(q)
+            d["id"] = str(uuid.uuid4())
+            d["created_at"] = datetime.now(timezone.utc).isoformat()
+            docs.append(d)
+        await db.quizzes.insert_many(docs)
+
+
+@app.on_event("startup")
+async def on_startup():
+    try:
+        # Cleanup legacy guest docs that had email explicitly set to null — they
+        # collide with the unique index. We unset the field entirely so partial
+        # index will ignore them.
+        await db.users.update_many({"email": None}, {"$unset": {"email": ""}})
+        # Drop legacy sparse index if present so we can rebuild as partial.
+        try:
+            indexes = await db.users.index_information()
+            if "email_1" in indexes and not indexes["email_1"].get("partialFilterExpression"):
+                await db.users.drop_index("email_1")
+        except Exception as ix_e:
+            logger.warning("Index cleanup issue: %s", ix_e)
+        await db.users.create_index(
+            "email",
+            unique=True,
+            partialFilterExpression={"email": {"$type": "string"}},
+        )
+        await db.users.create_index("id", unique=True)
+        await db.rules.create_index("key", unique=True)
+        await db.matches.create_index("user_id")
+        await db.daily.create_index("date", unique=True)
+        await db.daily_completions.create_index([("user_id", 1), ("date", 1)], unique=True)
+    except Exception as e:
+        logger.warning("Index init issue: %s", e)
+    await seed_admin()
+    await seed_test_user()
+    await seed_rules()
+    await seed_quizzes()
+    logger.info("RuleForge Chess startup complete.")
+
 
 @app.on_event("shutdown")
-async def shutdown_db_client():
+async def on_shutdown():
     client.close()
+
+
+app.include_router(api)
