@@ -112,6 +112,21 @@ export const api = {
   markAllRead: () =>
     request<{ ok: boolean }>('/notifications/read-all', { method: 'POST' }),
 
+  // Retention
+  rewardState: () =>
+    request<{ reward: { available: boolean; next_streak_if_claimed: number; multiplier: number; coins: number; xp: number } }>('/daily-reward/state'),
+  claimReward: () =>
+    request<{ claimed: boolean; coins: number; xp: number; multiplier: number; streak: number; user: any; already_claimed?: boolean }>(
+      '/daily-reward/claim', { method: 'POST' }),
+  puzzleDaily: () =>
+    request<{ daily: any; puzzle: any; completed: boolean }>('/puzzles/daily'),
+  puzzleRandom: () => request<{ puzzle: any }>('/puzzles/random'),
+  puzzleGet: (id: string) => request<{ puzzle: any }>(`/puzzles/${id}`),
+  puzzleAttempt: (id: string, body: { moves: string[]; success: boolean; time_taken_ms: number; used_hint: boolean }) =>
+    request<any>(`/puzzles/${id}/attempt`, { method: 'POST', body: JSON.stringify(body) }),
+  puzzleHistory: () =>
+    request<{ history: any[]; solved: number; total: number }>('/puzzles/me/history'),
+
   // Daily
   daily: () => request<{ challenge: any; completed: boolean }>('/daily'),
   submitDaily: (moves_san: string[], completed: boolean) =>

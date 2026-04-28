@@ -19,6 +19,17 @@ export type User = {
   draws: number;
   premium: boolean;
   avatar?: string | null;
+  // Retention fields (from /api/auth/me & /retention router)
+  level?: number;
+  level_progress?: number;
+  level_needed?: number;
+  puzzle_rating?: number;
+  login_streak?: number;
+  longest_login_streak?: number;
+  last_login_date?: string | null;
+  last_reward_date?: string | null;
+  daily_reward_available?: boolean;
+  next_streak_if_claimed?: number;
 };
 
 type Ctx = {

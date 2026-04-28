@@ -959,6 +959,11 @@ async def on_startup():
     await seed_test_user()
     await seed_rules()
     await seed_quizzes()
+    try:
+        from retention import seed_puzzles as _sp
+        await _sp(db)
+    except Exception as e:
+        logger.warning("Puzzle seed issue: %s", e)
     logger.info("RuleForge Chess startup complete.")
 
 
@@ -972,7 +977,17 @@ app.include_router(api)
 # Realtime + Social (multiplayer / friends / challenges / notifications)
 from realtime import ws_router  # noqa: E402
 from social import make_social_router  # noqa: E402
+from retention import (  # noqa: E402
+    make_retention_router,
+    seed_puzzles as _seed_puzzles,
+    _public_user as retention_public_user,
+)
 
 app.include_router(ws_router)  # /api/ws WebSocket
 social_router = make_social_router(current_user, _db_getter)
 app.include_router(social_router, prefix="/api")
+retention_router = make_retention_router(current_user, _db_getter, None)
+app.include_router(retention_router, prefix="/api")
+
+# Override the existing public_user to use the richer retention version
+public_user = retention_public_user  # noqa: F811

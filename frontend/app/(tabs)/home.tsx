@@ -6,6 +6,8 @@ import {
   Pressable,
   ScrollView,
   RefreshControl,
+  Modal,
+  ActivityIndicator,
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -13,6 +15,7 @@ import { useAuth } from '../../src/auth';
 import { api } from '../../src/api';
 import { realtime } from '../../src/ws';
 import { colors, radii, ruleColors, spacing } from '../../src/theme';
+import Button from '../../src/components/Button';
 
 export default function Home() {
   const { user, refresh } = useAuth();
@@ -21,6 +24,10 @@ export default function Home() {
   const [refreshing, setRefreshing] = useState(false);
   const [unread, setUnread] = useState(0);
   const [onlineCount, setOnlineCount] = useState(0);
+  const [dailyPuzzle, setDailyPuzzle] = useState<{ puzzle: any; completed: boolean } | null>(null);
+  const [showReward, setShowReward] = useState(false);
+  const [rewardResult, setRewardResult] = useState<any>(null);
+  const [claiming, setClaiming] = useState(false);
 
   const loadNotifs = useCallback(async () => {
     try {
@@ -36,6 +43,30 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
+  const loadDailyPuzzle = useCallback(async () => {
+    try {
+      const r = await api.puzzleDaily();
+      setDailyPuzzle({ puzzle: r.puzzle, completed: r.completed });
+    } catch {}
+  }, []);
+
+  // Auto-show reward popup once per session
+  useEffect(() => {
+    if (user?.daily_reward_available && !rewardResult) setShowReward(true);
+  }, [user?.daily_reward_available, rewardResult]);
+
+  const claimReward = async () => {
+    setClaiming(true);
+    try {
+      const r = await api.claimReward();
+      if (r.user) { /* rely on refresh */ }
+      setRewardResult(r);
+      await refresh();
+    } finally {
+      setClaiming(false);
+    }
+  };
+
   const load = useCallback(async () => {
     try {
       const r = await api.rules();
@@ -49,7 +80,8 @@ export default function Home() {
       refresh();
       loadNotifs();
       loadOnline();
-    }, [load, refresh, loadNotifs, loadOnline]),
+      loadDailyPuzzle();
+    }, [load, refresh, loadNotifs, loadOnline, loadDailyPuzzle]),
   );
 
   // Global realtime listeners (unread counter, redirect into incoming match, online count)
@@ -104,6 +136,49 @@ export default function Home() {
           </View>
         </View>
 
+        {/* Level + login streak strip */}
+        <View style={styles.retentionStrip} testID="home-retention-strip">
+          <View style={styles.levelBlock}>
+            <View style={styles.levelHeader}>
+              <Text style={styles.levelChip} testID="home-level-chip">
+                LV {user?.level ?? 1}
+              </Text>
+              <Text style={styles.levelXp} testID="home-level-xp">
+                {(user?.level_progress ?? 0)}/{(user?.level_needed ?? 200)} XP
+              </Text>
+            </View>
+            <View style={styles.progressTrack}>
+              <View
+                style={[
+                  styles.progressFill,
+                  {
+                    width: `${Math.min(
+                      100,
+                      Math.round(((user?.level_progress ?? 0) / Math.max(1, user?.level_needed ?? 1)) * 100),
+                    )}%`,
+                  },
+                ]}
+              />
+            </View>
+          </View>
+          <Pressable
+            onPress={() => user?.daily_reward_available && setShowReward(true)}
+            style={[
+              styles.streakChip,
+              user?.daily_reward_available && { borderColor: colors.accent, backgroundColor: 'rgba(234,179,8,0.08)' },
+            ]}
+            testID="home-streak-chip"
+          >
+            <Text style={styles.streakFlame}>🔥</Text>
+            <View>
+              <Text style={styles.streakValue}>{user?.login_streak ?? 0}</Text>
+              <Text style={styles.streakLabel}>
+                {user?.daily_reward_available ? 'CLAIM' : 'DAY STREAK'}
+              </Text>
+            </View>
+          </Pressable>
+        </View>
+
         {/* Hero */}
         {/* Play Online hero */}
         <Pressable
@@ -144,6 +219,47 @@ export default function Home() {
             <Text style={[styles.heroPiece, { color: colors.accent }]}>♚</Text>
           </View>
         </Pressable>
+
+        <Section title="Puzzles" subtitle="Sharpen your tactics every day.">
+          <Pressable
+            testID="home-daily-puzzle-card"
+            onPress={() =>
+              router.push({ pathname: '/puzzle', params: { mode: 'daily' } })
+            }
+            style={[
+              styles.puzzleHero,
+              dailyPuzzle?.completed && { borderColor: colors.success },
+            ]}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={styles.puzzleEyebrow}>
+                {dailyPuzzle?.completed ? 'DAILY · COMPLETED' : 'DAILY PUZZLE'}
+              </Text>
+              <Text style={styles.puzzleTitle}>
+                {dailyPuzzle?.puzzle?.title || 'Today\u2019s tactical brain teaser'}
+              </Text>
+              <Text style={styles.puzzleSub}>
+                {dailyPuzzle?.completed
+                  ? 'Solved! Come back tomorrow.'
+                  : `+25 XP · +10 coins · rated ${dailyPuzzle?.puzzle?.rating ?? '—'}`}
+              </Text>
+            </View>
+            <View style={styles.puzzleIcon}>
+              <Text style={{ fontSize: 28 }}>{dailyPuzzle?.completed ? '✓' : '♟'}</Text>
+            </View>
+          </Pressable>
+          <Pressable
+            testID="home-random-puzzle-card"
+            onPress={() => router.push({ pathname: '/puzzle', params: { mode: 'random' } })}
+            style={styles.smallCard}
+          >
+            <Text style={styles.smallCardEyebrow}>TRAINING</Text>
+            <Text style={styles.smallCardTitle}>Random puzzle</Text>
+            <Text style={styles.smallCardSub}>
+              Puzzle rating · {user?.puzzle_rating ?? 800}
+            </Text>
+          </Pressable>
+        </Section>
 
         <Section title="Rule Variants" subtitle="Classic chess, with a delightful twist.">
           {rules
@@ -232,6 +348,70 @@ export default function Home() {
 
         <View style={{ height: spacing.xl }} />
       </ScrollView>
+
+      {/* Daily reward modal */}
+      <Modal
+        visible={showReward}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowReward(false)}
+      >
+        <View style={styles.modalScrim}>
+          <View style={styles.rewardCard} testID="daily-reward-modal">
+            {!rewardResult ? (
+              <>
+                <Text style={styles.rewardEyebrow}>DAILY REWARD</Text>
+                <Text style={styles.rewardTitle}>Welcome back!</Text>
+                <Text style={styles.rewardSub}>
+                  Day {(user?.next_streak_if_claimed ?? user?.login_streak ?? 1)} streak. Keep it
+                  burning to earn bigger rewards.
+                </Text>
+                <View style={styles.rewardRow}>
+                  <View style={styles.rewardStat}>
+                    <Text style={styles.rewardStatLabel}>COINS</Text>
+                    <Text style={styles.rewardStatValue}>+50+</Text>
+                  </View>
+                  <View style={styles.rewardStat}>
+                    <Text style={styles.rewardStatLabel}>XP</Text>
+                    <Text style={styles.rewardStatValue}>+25+</Text>
+                  </View>
+                </View>
+                <View style={{ height: spacing.lg }} />
+                {claiming ? (
+                  <ActivityIndicator color={colors.accent} />
+                ) : (
+                  <Button label="Claim reward" onPress={claimReward} fullWidth testID="claim-reward-btn" />
+                )}
+                <View style={{ height: spacing.sm }} />
+                <Button
+                  label="Maybe later"
+                  variant="ghost"
+                  fullWidth
+                  onPress={() => setShowReward(false)}
+                />
+              </>
+            ) : (
+              <>
+                <Text style={[styles.rewardEyebrow, { color: colors.success }]}>CLAIMED</Text>
+                <Text style={styles.rewardTitle}>+{rewardResult?.coins} coins</Text>
+                <Text style={styles.rewardSub}>
+                  +{rewardResult?.xp} XP · ×{rewardResult?.multiplier} multiplier · {rewardResult?.streak}-day streak
+                </Text>
+                <View style={{ height: spacing.lg }} />
+                <Button
+                  label="Awesome"
+                  fullWidth
+                  onPress={() => {
+                    setShowReward(false);
+                    setRewardResult(null);
+                  }}
+                  testID="reward-done-btn"
+                />
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -412,4 +592,126 @@ const styles = StyleSheet.create({
     backgroundColor: colors.danger, alignItems: 'center', justifyContent: 'center',
   },
   badgePillText: { color: '#fff', fontSize: 10, fontWeight: '900' },
+
+  // Retention strip
+  retentionStrip: {
+    marginTop: spacing.lg,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+  },
+  levelBlock: {
+    flex: 1,
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: radii.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  levelHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  levelChip: {
+    color: colors.accent,
+    fontWeight: '900',
+    fontSize: 11,
+    letterSpacing: 1.5,
+  },
+  levelXp: {
+    color: colors.textSecondary,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  progressTrack: {
+    marginTop: 6,
+    height: 6,
+    borderRadius: 4,
+    backgroundColor: colors.elevated,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: colors.accent,
+    borderRadius: 4,
+  },
+  streakChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: radii.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 8,
+    minWidth: 92,
+  },
+  streakFlame: { fontSize: 22 },
+  streakValue: { color: colors.textPrimary, fontWeight: '900', fontSize: 16 },
+  streakLabel: { color: colors.textMuted, fontSize: 9, fontWeight: '900', letterSpacing: 1.4 },
+
+  // Puzzle hero
+  puzzleHero: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: radii.lg,
+    padding: spacing.lg,
+    gap: spacing.md,
+  },
+  puzzleEyebrow: { color: colors.accent, fontSize: 10, fontWeight: '900', letterSpacing: 3 },
+  puzzleTitle: { color: colors.textPrimary, fontSize: 17, fontWeight: '800', marginTop: 4 },
+  puzzleSub: { color: colors.textSecondary, fontSize: 12, marginTop: 4 },
+  puzzleIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: colors.elevated,
+    borderColor: colors.border,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  // Reward modal
+  modalScrim: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: spacing.xl,
+  },
+  rewardCard: {
+    width: '100%',
+    maxWidth: 420,
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: radii.xl,
+    padding: spacing.xl,
+  },
+  rewardEyebrow: { color: colors.accent, fontSize: 11, fontWeight: '900', letterSpacing: 4 },
+  rewardTitle: { color: colors.textPrimary, fontSize: 26, fontWeight: '900', marginTop: spacing.xs },
+  rewardSub: { color: colors.textSecondary, marginTop: spacing.sm, fontSize: 13, lineHeight: 19 },
+  rewardRow: {
+    flexDirection: 'row',
+    gap: spacing.md,
+    marginTop: spacing.lg,
+  },
+  rewardStat: {
+    flex: 1,
+    backgroundColor: colors.elevated,
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: radii.md,
+    padding: spacing.md,
+    alignItems: 'center',
+  },
+  rewardStatLabel: { color: colors.textMuted, fontSize: 10, fontWeight: '900', letterSpacing: 2 },
+  rewardStatValue: { color: colors.accent, fontSize: 22, fontWeight: '900', marginTop: 4 },
 });
