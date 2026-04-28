@@ -41,7 +41,11 @@ export default function Chessboard({
   onSquarePress,
 }: Props) {
   const squareSize = Math.floor(size / 8);
-  const board = useMemo(() => rc.board(), [rc]);
+  // Note: do NOT useMemo on rc.board() — rc is a ref-stable object whose
+  // internal state mutates in place. Memoising would freeze the rendered
+  // position to the starting board even though moves are made. Recomputing
+  // 64 squares on each render is cheap.
+  const board = rc.board();
   const lastMove = rc.lastMove;
   const targetMap = useMemo(() => {
     const m: Record<string, LegalTarget> = {};
