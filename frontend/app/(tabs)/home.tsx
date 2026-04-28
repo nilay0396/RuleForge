@@ -11,6 +11,7 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../../src/auth';
 import { api } from '../../src/api';
+import { realtime } from '../../src/ws';
 import { colors, radii, ruleColors, spacing } from '../../src/theme';
 
 export default function Home() {
@@ -18,6 +19,22 @@ export default function Home() {
   const router = useRouter();
   const [rules, setRules] = useState<any[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [unread, setUnread] = useState(0);
+  const [onlineCount, setOnlineCount] = useState(0);
+
+  const loadNotifs = useCallback(async () => {
+    try {
+      const r = await api.notifications();
+      setUnread(r.unread || 0);
+    } catch {}
+  }, []);
+  const loadOnline = useCallback(async () => {
+    try {
+      const r = await api.online();
+      setOnlineCount((r.online || []).filter((o: any) => o.id !== user?.id).length);
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
 
   const load = useCallback(async () => {
     try {
@@ -30,8 +47,26 @@ export default function Home() {
     useCallback(() => {
       load();
       refresh();
-    }, [load, refresh]),
+      loadNotifs();
+      loadOnline();
+    }, [load, refresh, loadNotifs, loadOnline]),
   );
+
+  // Global realtime listeners (unread counter, redirect into incoming match, online count)
+  useEffect(() => {
+    realtime.connect();
+    const off = realtime.on((m) => {
+      if (m.type === 'notification') {
+        setUnread((u) => u + 1);
+      } else if (m.type === 'presence') {
+        setOnlineCount((m.online || []).filter((o: any) => o.id !== user?.id).length);
+      } else if (m.type === 'match_found') {
+        router.push({ pathname: '/play_online', params: { game_id: m.game_id } });
+      }
+    });
+    return () => off();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     load();
@@ -39,7 +74,7 @@ export default function Home() {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await Promise.all([load(), refresh()]);
+    await Promise.all([load(), refresh(), loadNotifs(), loadOnline()]);
     setRefreshing(false);
   };
 
@@ -109,6 +144,31 @@ export default function Home() {
         </Section>
 
         <Section title="More" subtitle="Daily challenges, leaderboard and learn.">
+          <Pressable
+            testID="home-friends-card"
+            onPress={() => router.push('/friends')}
+            style={[styles.smallCard]}
+          >
+            <Text style={styles.smallCardEyebrow}>SOCIAL</Text>
+            <Text style={styles.smallCardTitle}>Friends</Text>
+            <Text style={styles.smallCardSub}>Add, challenge, climb together</Text>
+          </Pressable>
+          <Pressable
+            testID="home-challenges-card"
+            onPress={() => router.push('/challenges')}
+            style={[styles.smallCard, unread > 0 && { borderColor: colors.accent }]}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Text style={styles.smallCardEyebrow}>CHALLENGES</Text>
+              {unread > 0 ? (
+                <View style={styles.badgePill} testID="home-notif-badge">
+                  <Text style={styles.badgePillText}>{unread}</Text>
+                </View>
+              ) : null}
+            </View>
+            <Text style={styles.smallCardTitle}>Friend matches</Text>
+            <Text style={styles.smallCardSub}>{unread > 0 ? `${unread} new` : 'View incoming & outgoing'}</Text>
+          </Pressable>
           <Pressable
             testID="home-daily-card"
             onPress={() => router.push('/daily')}
@@ -328,4 +388,9 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   smallCardSub: { color: colors.textSecondary, fontSize: 13, marginTop: 4 },
+  badgePill: {
+    minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 5,
+    backgroundColor: colors.danger, alignItems: 'center', justifyContent: 'center',
+  },
+  badgePillText: { color: '#fff', fontSize: 10, fontWeight: '900' },
 });

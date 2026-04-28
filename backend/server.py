@@ -178,6 +178,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Wire DB onto app.state for realtime/social modules
+app.state.db = db
+
+
+def _db_getter(request: Request):  # used by social router factory
+    return request.app.state.db
+
 
 # -----------------------------------------------------------------------------
 # Auth dependency
@@ -961,3 +968,11 @@ async def on_shutdown():
 
 
 app.include_router(api)
+
+# Realtime + Social (multiplayer / friends / challenges / notifications)
+from realtime import ws_router  # noqa: E402
+from social import make_social_router  # noqa: E402
+
+app.include_router(ws_router)  # /api/ws WebSocket
+social_router = make_social_router(current_user, _db_getter)
+app.include_router(social_router, prefix="/api")

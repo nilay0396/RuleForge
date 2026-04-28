@@ -80,6 +80,38 @@ export const api = {
   myMatches: () => request<{ matches: any[] }>('/matches/me'),
   ratingHistory: () => request<{ history: any[] }>('/rating/history'),
 
+  // Social
+  searchUsers: (q: string) =>
+    request<{ users: any[] }>(`/users/search?q=${encodeURIComponent(q)}`),
+  online: () => request<{ online: any[] }>('/online'),
+  friends: () => request<{ accepted: any[]; incoming: any[]; outgoing: any[] }>('/friends'),
+  friendRequest: (friend_id: string) =>
+    request<{ friendship: any }>('/friends/request', {
+      method: 'POST',
+      body: JSON.stringify({ friend_id }),
+    }),
+  friendAccept: (fid: string) =>
+    request<{ ok: boolean }>(`/friends/${fid}/accept`, { method: 'POST' }),
+  friendReject: (fid: string) =>
+    request<{ ok: boolean }>(`/friends/${fid}/reject`, { method: 'POST' }),
+  friendDelete: (fid: string) =>
+    request<{ deleted: number }>(`/friends/${fid}`, { method: 'DELETE' }),
+  challenges: () =>
+    request<{ incoming: any[]; outgoing: any[] }>('/challenges'),
+  createChallenge: (receiver_id: string, rule_key = 'classic') =>
+    request<{ challenge: any }>('/challenges', {
+      method: 'POST',
+      body: JSON.stringify({ receiver_id, rule_key }),
+    }),
+  acceptChallenge: (cid: string) =>
+    request<{ ok: boolean; game_id: string }>(`/challenges/${cid}/accept`, { method: 'POST' }),
+  rejectChallenge: (cid: string) =>
+    request<{ ok: boolean }>(`/challenges/${cid}/reject`, { method: 'POST' }),
+  notifications: () =>
+    request<{ notifications: any[]; unread: number }>('/notifications'),
+  markAllRead: () =>
+    request<{ ok: boolean }>('/notifications/read-all', { method: 'POST' }),
+
   // Daily
   daily: () => request<{ challenge: any; completed: boolean }>('/daily'),
   submitDaily: (moves_san: string[], completed: boolean) =>

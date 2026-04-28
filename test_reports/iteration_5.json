@@ -1,0 +1,47 @@
+{
+  "summary": "Iteration 3 (multiplayer + social) testing. Backend: 9/9 pytest tests PASS — WS auth (1008 on bad token, 101+hello on good), matchmaking pairs admin & player1, e2->e4 broadcasts move w/ san=e4 + turn=b, illegal turn rejection ('not your turn'), e7->e5 by black succeeds, white resign yields game_over (loss/win) + ELO delta + persisted rating_history, REST /online, /users/search, /friends/request+accept w/ notifications, challenge create+accept emits match_found over WS w/ challenge_id. Frontend: found 1 critical bug — home.tsx referenced `realtime` without importing it, causing a red-screen 'ReferenceError: realtime is not defined' on /home. Fixed by adding `import { realtime } from '../../src/ws';`. After fix and expo restart, /home renders cleanly; home-friends-card, home-challenges-card, home-notif-badge present. /online has online-find -> online-cancel working. /friends has friends-search filtering and friends-add-* button. /challenges renders. /play_online renders the chessboard + online-resign. Remaining feature gap: testID 'home-play-online' tile is NOT in home.tsx (request specifies a Play Online hero tile separate from 'home-quickplay').",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "app/(tabs)/home.tsx",
+        "issue": "Missing 'Play Online' hero tile with testID 'home-play-online'. Request explicitly requires this tile alongside home-friends-card and home-challenges-card; only home-quickplay (AI Classic) and the two social cards exist today.",
+        "testID": "home-play-online",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {
+        "component": "app/(tabs)/home.tsx (line 56-57 originally)",
+        "issue": "FIXED by tester — was using `realtime.connect()` and `realtime.on(...)` without importing `realtime` from '../../src/ws', causing red-screen ReferenceError that prevented /home from rendering at all (and therefore all home-* testIDs were missing). Added the import; verified via Playwright that /home now renders without uncaught error and tiles appear."
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration3.py",
+    "/app/test_reports/pytest/iteration3_results.xml"
+  ],
+  "action_items": [
+    "Add a 'Play Online' hero Pressable with testID='home-play-online' in app/(tabs)/home.tsx that navigates to '/online'. Suggested placement: directly above or beside the QUICK PLAY hero so it acts as the multiplayer entry point as described in the spec.",
+    "(Optional polish) Consider auto-connecting realtime inside src/auth.tsx (AuthProvider) instead of inside Home so tabs like /friends and /challenges receive notifications even before the user lands on Home.",
+    "(Sanity) Run a quick lint pass (ts-prune or eslint no-undef) — the missing-import bug would have been caught by `eslint --rule no-undef:error` and is the same class of regression that bit iteration 2 (playSound)."
+  ],
+  "critical_code_review_comments": [
+    "realtime.py — `_handle_make_move` correctly returns the SAN, FEN, moves_san, turn, and broadcasts to both players' user_ids; the tiny redundant `winner` line at 646-648 can be dropped (the second assignment dominates) but is harmless.",
+    "social.py — `accept_challenge` does not require the sender to be online; if the sender is offline the WS match_found is silently dropped (only persisted via games map). Consider returning a hint or queuing a notification 'match ready, reconnect to play' in addition to the WS push.",
+    "social.py — `_public_user(users_map.get(c['receiver_id'], {'id': c['receiver_id'], 'name': '?'}))` will KeyError if user disappears mid-flight (defensive default lacks `id` field for `_public_user`'s `is_online(user['id'])`). Add `int(user.get('elo', 800))` guard or default `id` key — currently any partial dict missing 'id' would throw.",
+    "ws.ts (frontend) — confirmed `realtime` is the correct exported singleton; auto-reconnect at 1.5s is reasonable. Importing it lazily inside Home is fine but should ideally live in AuthProvider (see action_items)."
+  ],
+  "updated_files": [
+    "/app/frontend/app/(tabs)/home.tsx (added missing import for `realtime`)",
+    "/app/backend/tests/test_iteration3.py (new comprehensive iteration-3 test suite)"
+  ],
+  "success_rate": {"backend": "9/9 (100%)", "frontend": "5/6 flows live-verified; 1 missing testID (home-play-online)"},
+  "seed_data_creation": "Test friend request/accept and challenge accept created small DB rows for player1<->admin (idempotent) and several rating_history rows from the resignation test. None should impact future iterations.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "After main agent adds the home-play-online tile, retest /home renders the new tile, tapping it routes to /online (already verified working), and verify the rest of the iteration-3 frontend flows still work end-to-end (login as player1@ruleforge.app/Player@1234 in one browser and admin@ruleforge.app/Admin@1234 in another to drive the live multiplayer match flow over WS — backend already validated this is functional).",
+  "rca_of_issue": "Bug: red-screen 'realtime is not defined' on /home. RCA: app/(tabs)/home.tsx introduces realtime.connect()/realtime.on() inside a useEffect at line 55 (iteration-3 addition) but its import block (lines 1-14) was never updated to pull `realtime` from '../../src/ws' (file already exports `export const realtime = new RealtimeClient()` at line 114). At first render React executes the effect, hits the bare identifier, and crashes the Home component, which cascades through TabsLayout. Fix: add `import { realtime } from '../../src/ws';` at the top of home.tsx. Verified post-fix via Playwright after `sudo supervisorctl restart expo` to bust Metro's CI-mode cache."
+}

@@ -1,5 +1,27 @@
 # RuleForge Chess — Product Requirements Document (MVP)
 
+## MVP Scope (Iteration 3 — Real-time multiplayer & social)
+
+### Real-time multiplayer (v1: classic chess)
+- WebSocket gateway at `/api/ws?token=<jwt>` (FastAPI)
+- Server-authoritative move validation via `python-chess`
+- In-memory game manager + persisted records: `online_games`, `online_moves`
+- Matchmaking queue: paired by ELO ±200, expanding +50/sec up to ±800
+- Disconnect grace: 30 s reconnect window, otherwise opponent wins
+- Game over: full Elo update on both players + `rating_history` rows + match docs
+
+### Friends + Challenges + Presence
+- User search (name / exact email)
+- Friend request / accept / reject (state in `friends` collection)
+- Direct friend challenge → live game on accept (random color assignment)
+- Challenge state in `challenges` collection (pending / accepted / rejected, 10-minute expiry)
+- Online presence broadcast to all clients on connect/disconnect
+
+### Notifications
+- Persisted in `notifications` collection (id, user_id, type, message, data, is_read, created_at)
+- Pushed live over WS (`type: notification`)
+- Home shows unread badge on the Challenges card
+
 ## MVP Scope (Iteration 2 update)
 ### Gameplay upgrades (v2)
 - **Proper ELO**: K=32; opponent rating per AI level (L1=600, L2=900, L3=1200, L4=1500); new users start at 800.

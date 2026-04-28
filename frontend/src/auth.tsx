@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { api, getToken, setToken } from './api';
+import { realtime } from './ws';
 
 export type User = {
   id: string;
@@ -54,6 +55,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  // Manage realtime WS lifecycle alongside auth
+  useEffect(() => {
+    if (user && !user.is_guest && user.id) {
+      realtime.connect();
+    } else {
+      realtime.disconnect();
+    }
+  }, [user?.id, user?.is_guest]);
 
   const signIn = async (email: string, password: string) => {
     const r = await api.login(email, password);
