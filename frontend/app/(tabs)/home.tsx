@@ -105,6 +105,25 @@ export default function Home() {
         </View>
 
         {/* Hero */}
+        {/* Play Online hero */}
+        <Pressable
+          testID="home-play-online"
+          onPress={() => router.push('/online')}
+          style={[styles.hero, { borderColor: colors.accent, marginTop: spacing.xl }]}
+        >
+          <View style={styles.heroLeft}>
+            <Text style={styles.heroEyebrow}>PLAY ONLINE · LIVE</Text>
+            <Text style={styles.heroTitle}>Live{'\n'}Multiplayer</Text>
+            <Text style={styles.heroSub}>{onlineCount} player{onlineCount === 1 ? '' : 's'} online · matched by ELO</Text>
+          </View>
+          <View style={styles.heroBoardSet}>
+            <Text style={styles.heroPiece}>♞</Text>
+            <Text style={styles.heroPiece}>♝</Text>
+            <Text style={[styles.heroPiece, { color: colors.accent }]}>♛</Text>
+          </View>
+        </Pressable>
+
+
         <Pressable
           testID="home-quickplay"
           onPress={() =>
