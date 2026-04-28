@@ -198,4 +198,59 @@ export const api = {
       '/ads/reward',
       { method: 'POST' },
     ),
+
+  // Tournaments
+  tournaments: (scope: 'all' | 'live' | 'upcoming' | 'finished' = 'all') =>
+    request<{ tournaments: any[] }>(`/tournaments?scope=${scope}`),
+  tournamentDetail: (id: string) =>
+    request<{ tournament: any; leaderboard: any[]; my_rank: number | null }>(
+      `/tournaments/${encodeURIComponent(id)}`,
+    ),
+  tournamentJoin: (id: string) =>
+    request<{ ok: boolean; joined?: boolean; already_joined?: boolean }>(
+      `/tournaments/${encodeURIComponent(id)}/join`,
+      { method: 'POST' },
+    ),
+  tournamentLeave: (id: string) =>
+    request<{ ok: boolean }>(
+      `/tournaments/${encodeURIComponent(id)}/leave`,
+      { method: 'POST' },
+    ),
+  tournamentReport: (id: string, opponent_id: string, result: 'win' | 'loss' | 'draw') =>
+    request<{ ok: boolean; score_added: number; player: any }>(
+      `/tournaments/${encodeURIComponent(id)}/report-match`,
+      { method: 'POST', body: JSON.stringify({ opponent_id, result }) },
+    ),
+
+  // Global leaderboard (extended)
+  globalLeaderboard: (scope: 'global' | 'country' = 'global', country?: string, limit = 50) => {
+    const q = new URLSearchParams({ scope, limit: String(limit) });
+    if (country) q.set('country', country);
+    return request<{ leaderboard: any[]; countries: string[] }>(`/leaderboard/global?${q.toString()}`);
+  },
+
+  // Watch live
+  liveGames: () => request<{ games: any[]; count: number }>('/live/games'),
+  liveGameDetail: (id: string) =>
+    request<{ game_id: string; white: any; black: any; rule_key: string; fen: string; moves_san: string[]; spectators: number }>(
+      `/live/games/${encodeURIComponent(id)}`,
+    ),
+  featuredPlayers: () => request<{ featured: any[] }>('/featured-players'),
+
+  // Badges
+  badges: () => request<{ badges: any[] }>('/badges'),
+  myBadges: () => request<{ badges: any[]; count: number }>('/badges/me'),
+
+  // Country
+  setCountry: (country: string) =>
+    request<{ ok: boolean; country: string }>('/profile/country', {
+      method: 'PUT',
+      body: JSON.stringify({ country }),
+    }),
+
+  // Match share
+  matchShare: (id: string) =>
+    request<{ share: { title: string; text: string; result: string; rating_after?: number; elo_delta?: number; rule_key?: string }; match_id: string }>(
+      `/matches/${encodeURIComponent(id)}/share`,
+    ),
 };

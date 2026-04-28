@@ -422,6 +422,8 @@ def _public_user(user: Dict[str, Any]) -> Dict[str, Any]:
         "draws": int(user.get("draws", 0)),
         "premium": bool(user.get("premium", False)),
         "is_premium": bool(user.get("is_premium", user.get("premium", False))),
+        "is_featured": bool(user.get("is_featured", False)),
+        "country": user.get("country"),
         "avatar": user.get("avatar"),
         "created_at": user.get("created_at"),
     }

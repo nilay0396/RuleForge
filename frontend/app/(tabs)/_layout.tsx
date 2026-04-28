@@ -49,11 +49,25 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="watch"
+        options={{
+          title: 'WATCH',
+          tabBarIcon: ({ color }) => <TabIcon glyph="◎" color={color} />,
+          tabBarTestID: 'tab-watch',
+        }}
+      />
+      <Tabs.Screen
+        name="tournaments"
+        options={{
+          title: 'TOURNEY',
+          tabBarIcon: ({ color }) => <TabIcon glyph="⚔" color={color} />,
+          tabBarTestID: 'tab-tournaments',
+        }}
+      />
+      <Tabs.Screen
         name="daily"
         options={{
-          title: 'DAILY',
-          tabBarIcon: ({ color }) => <TabIcon glyph="✦" color={color} />,
-          tabBarTestID: 'tab-daily',
+          href: null,  // hide from tab bar; still routable via /(tabs)/daily
         }}
       />
       <Tabs.Screen

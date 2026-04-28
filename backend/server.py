@@ -419,6 +419,22 @@ async def record_match(payload: MatchIn, user: Dict[str, Any] = Depends(current_
         except Exception as e:
             logger.warning("Match transaction log failed: %s", e)
 
+    # Award badges (post-match)
+    new_badges = []
+    try:
+        from viral import check_post_match_badges
+        fresh = await db.users.find_one({"id": user["id"]}, {"_id": 0})
+        if fresh:
+            new_badges = await check_post_match_badges(db, fresh) or []
+            # Rule breaker for any custom-rule win
+            if payload.result == "win" and payload.rule_key not in ("classic", "", None):
+                from viral import _award_badge as _aw
+                rb = await _aw(db, user["id"], "rule_breaker")
+                if rb:
+                    new_badges.append(rb)
+    except Exception as e:
+        logger.warning("Badge check failed: %s", e)
+
     # Badge logic
     user2 = await db.users.find_one({"id": user["id"]}, {"_id": 0})
     new_badges: List[str] = list(user2.get("badges", []))
@@ -982,6 +998,12 @@ async def on_startup():
         await _ss(db)
     except Exception as e:
         logger.warning("Store seed issue: %s", e)
+    try:
+        from viral import seed_badges as _sb, seed_demo_tournaments as _st
+        await _sb(db)
+        await _st(db)
+    except Exception as e:
+        logger.warning("Viral seed issue: %s", e)
     logger.info("RuleForge Chess startup complete.")
 
 
@@ -1011,6 +1033,16 @@ app.include_router(retention_router, prefix="/api")
 from monetization import make_monetization_router  # noqa: E402
 monetization_router = make_monetization_router(current_user, _db_getter)
 app.include_router(monetization_router, prefix="/api")
+
+# Viral / scale (tournaments, watch live, badges, featured, share)
+from viral import make_viral_router  # noqa: E402
+from realtime import games as _live_games_manager  # noqa: E402
+viral_router = make_viral_router(
+    current_user, _db_getter,
+    push_notification_fn=None,
+    get_realtime_rooms=lambda: _live_games_manager,
+)
+app.include_router(viral_router, prefix="/api")
 
 # Override the existing public_user to use the richer retention version
 public_user = retention_public_user  # noqa: F811

@@ -300,6 +300,111 @@ backend:
           agent: "testing"
           comment: "Verified via GET /api/auth/me after claim: login_streak=1, daily_reward_available=false, last_reward_date=today (YYYY-MM-DD). level/level_progress/level_needed are integers; puzzle_rating=800 default present."
 
+  - task: "Tournaments CRUD + leaderboard + report-match"
+    implemented: true
+    working: true
+    file: "/app/backend/viral.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Seeded 1 live + 2 upcoming. Endpoints: GET /api/tournaments[?scope], GET /api/tournaments/{id}, POST join/leave, GET leaderboard, POST report-match. Auto-promotes status by time. Awards arena_debut, podium, champion badges on completion."
+        - working: true
+          agent: "testing"
+          comment: |
+            Verified end-to-end via /app/viral_test.py.
+            [PASS] GET /tournaments?scope=all → 3 rows (1 live + 2 upcoming) with full schema (id/name/type=blitz_arena/start_time/end_time/status/prize_coins/rule_key/players/joined).
+            [PASS] scope=live filter (count=1), scope=upcoming filter (count=2).
+            [PASS] GET /tournaments/{live_id} returns {tournament, leaderboard:[], my_rank:null} initially.
+            [PASS] POST join → {ok, joined:true}; second join → {ok, already_joined:true}; db.tournament_players doc created with score/wins/losses/draws=0.
+            [PASS] report-match win → score_added=3 wins=1 score=3; draw → +1 draws=1 score=4; loss → +0 losses=1.
+            [PASS] report-match before joining (after leave) → 403 "You haven't joined this tournament".
+            [PASS] report-match on upcoming → 400 "Tournament is not live".
+            [PASS] POST /leave → {ok, deleted:1}.
+            [PASS] GET /tournaments/{id}/leaderboard returns hydrated rows with rank/elo/country/avatar/is_featured/is_premium.
+            [PASS] Edge: join wrong-id → 404.
+  - task: "Global leaderboard with country filter"
+    implemented: true
+    working: true
+    file: "/app/backend/viral.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "GET /api/leaderboard/global?scope=global|country&country=XX returns ranked rows + distinct countries list."
+        - working: true
+          agent: "testing"
+          comment: |
+            [PASS] scope=global&limit=10 → rows sorted by elo desc with rank field on every row; countries list non-empty (['IN','US']).
+            [PASS] scope=country&country=US returns only US users.
+            [PASS] scope=country&country=ZZ returns 200 with leaderboard:[] (empty but valid).
+  - task: "Featured players & live games"
+    implemented: true
+    working: false
+    file: "/app/backend/viral.py"
+    stuck_count: 1
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "GET /api/featured-players, GET /api/live/games (sourced from realtime.GameManager). WS /api/live/spectate/{game_id} sends snapshot."
+        - working: false
+          agent: "testing"
+          comment: |
+            [PASS] GET /featured-players returns admin user (name 'GM Admin', country='US', is_featured implicit).
+            [PASS] GET /live/games → {games:[], count:0} when no in-process games.
+            [PASS] GET /live/games/non-existent-id → 404.
+            [FAIL] WebSocket /api/live/spectate/{game_id} does NOT send {type:'error', detail:'Game not active'} when game does not exist.
+              Root cause: in viral.py spectate_ws handler, `rooms_dict = get_realtime_rooms()` is wired in server.py to return the realtime.games GameManager *instance*, not a dict. The handler then does `rooms_dict.get(game_id)`, but GameManager.get is `async def`, so it returns a coroutine (which is truthy). The handler enters the `if room:` branch, then tries room.get("fen") → AttributeError, swallowed by bare `except Exception: pass`. The error frame is never sent to the client; the WS just hangs until idle close.
+              Fix recommendation: either change get_realtime_rooms in server.py to expose a snapshot dict view (e.g., `{gid: {"fen": g.board.fen(), "moves": g.moves_san, "white_user": ..., ...} for gid,g in games.games.items()}` — only ongoing) OR change viral.py to call `getattr(rooms_dict, 'games', {}).get(game_id)` and access LiveGame attributes directly. Make sure the fallback `else: send_json({type:'error', detail:'Game not active'})` is reached for missing games.
+  - task: "Badges system + auto-award hooks"
+    implemented: true
+    working: true
+    file: "/app/backend/viral.py, /app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "11 badges seeded. GET /api/badges, /api/badges/me. Auto-awarded post-match (first_win, ten_wins, fifty_wins, rule_breaker, streak_5/30). Tournament winner badges awarded on finish."
+        - working: true
+          agent: "testing"
+          comment: |
+            [PASS] GET /badges returns all 11 expected keys (first_win, ten_wins, fifty_wins, rule_breaker, streak_5, streak_30, puzzle_solver, tournament_join, tournament_top3, tournament_winner, spectator).
+            [PASS] On joining a tournament, /badges/me includes 'tournament_join'.
+            [PASS] After 1 classic-win match, /badges/me adds 'first_win'.
+            [PASS] After 10 classic-win matches, /badges/me adds 'ten_wins'.
+            [PASS] After a custom-rule win (king_dash), /badges/me adds 'rule_breaker'.
+  - task: "Country profile + match share"
+    implemented: true
+    working: false
+    file: "/app/backend/viral.py"
+    stuck_count: 1
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "PUT /api/profile/country sets ISO 2-letter. GET /api/matches/{id}/share returns share text/title."
+        - working: false
+          agent: "testing"
+          comment: |
+            [PASS] PUT /profile/country {country:'in'} → 200 {ok:true, country:'IN'}.
+            [PASS] PUT /profile/country {country:'X1'} → 400 (digit fails .isalpha()).
+            [PASS] GET /matches/{id}/share returns {share:{title,text,result,rating_before,rating_after,elo_delta,rule_key,moves}, match_id} — full payload OK.
+            [FAIL] PUT /profile/country {country:'USA'} → expected 400, got 200 with country='US'.
+              Root cause: viral.py:set_country does `country = (body.get('country') or '').upper()[:2]` BEFORE validation, so 'USA' is silently truncated to 'US' which then passes the .isalpha() & len==2 check.
+              Fix recommendation: validate the raw input length first, e.g.
+                raw = (body.get('country') or '').strip()
+                if len(raw) != 2 or not raw.isalpha(): raise HTTPException(400, ...)
+                country = raw.upper()
+
 frontend:
   - task: "Home retention strip (level + streak chip)"
     implemented: true
@@ -358,13 +463,12 @@ metadata:
 
 test_plan:
   current_focus:
-    - "Wallet endpoints (/wallet, /transactions)"
-    - "Store list & purchase (/store, /store/{key}/buy)"
-    - "Inventory listing (/inventory)"
-    - "Preferences GET/PUT (/preferences)"
-    - "Premium subscribe & cancel (/premium, /premium/subscribe, /premium/cancel)"
-    - "Rewarded ads state & reward (/ads/state, /ads/reward)"
-    - "Transaction logging from match wins, daily reward, puzzle attempts"
+    - "Tournaments CRUD (/tournaments, join/leave, leaderboard, report-match)"
+    - "Global leaderboard (/leaderboard/global) with country scope"
+    - "Featured players & live games (/featured-players, /live/games)"
+    - "Badges (/badges, /badges/me) + auto-award hooks"
+    - "Country profile (/profile/country) + match share (/matches/{id}/share)"
+    - "Spectator websocket /api/live/spectate/{game_id}"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -518,3 +622,81 @@ agent_communication:
         No 500s, no schema regressions. Monetization layer ready for production
         wiring (Stripe/Razorpay can replace the mock subscribe path without other
         changes).
+    - agent: "testing"
+      message: |
+        Iteration 6 (Viral / Scale) backend tested via /app/viral_test.py against
+        EXPO_PUBLIC_BACKEND_URL using player1 + admin credentials.
+        Total: 38 PASSED, 2 FAILED.
+
+        State mutations (documented):
+          - users.update_one(player1, {country:'IN'})
+          - users.update_one(admin,   {is_featured:true, country:'US'})
+          - user_badges.delete_many({user_id:player1}) and users.badges=[] before
+            running first_win/ten_wins/rule_breaker checks
+          - users.update_one(player1, {wins:0, losses:0, draws:0}) before badge stack
+          - tournament_players.delete_many({user_id:player1}) for clean-state checks
+
+        ============== PASSED ==============
+        [PASS] /tournaments?scope=all returns 3 rows (1 live + 2 upcoming) with full schema
+        [PASS] type='blitz_arena' on every row
+        [PASS] scope=live (1 row) / scope=upcoming (2 rows) filters
+        [PASS] /tournaments/{id} returns {tournament, leaderboard:[], my_rank:null}
+        [PASS] join → {ok, joined:true}; second join → {ok, already_joined:true}
+        [PASS] db.tournament_players doc score/wins/losses/draws=0 on first join
+        [PASS] /badges/me includes 'tournament_join' after join
+        [PASS] report-match win → score_added=3, wins=1, score=3
+        [PASS] report-match draw → score_added=1, draws=1, score=4
+        [PASS] report-match loss → score_added=0, losses=1
+        [PASS] report-match before joining → 403
+        [PASS] report-match on upcoming → 400 "Tournament is not live"
+        [PASS] /leave → {ok, deleted:1}
+        [PASS] /tournaments/{id}/leaderboard returns rows hydrated with rank/elo/country/avatar/is_featured/is_premium
+        [PASS] /leaderboard/global?scope=global&limit=10 sorted desc by elo, every row has rank, countries=['IN','US']
+        [PASS] scope=country&country=US → only US users
+        [PASS] scope=country&country=ZZ → 200 with empty leaderboard
+        [PASS] /featured-players includes admin (name='GM Admin', country='US')
+        [PASS] /live/games → {games:[], count:0}
+        [PASS] /live/games/non-existent → 404
+        [PASS] /badges has all 11 default keys
+        [PASS] PUT /profile/country {'in'} → 200 country='IN'
+        [PASS] PUT /profile/country {'X1'} → 400
+        [PASS] POST /matches classic win → first_win badge
+        [PASS] After 10 classic wins → ten_wins badge
+        [PASS] Custom-rule (king_dash) win → rule_breaker badge
+        [PASS] /matches/{id}/share returns {share:{title,text,result,rating_before,rating_after,elo_delta,rule_key,moves}, match_id}
+        [PASS] join wrong tournament id → 404
+
+        ============== FAILED ==============
+        [FAIL] PUT /profile/country {'USA'} → expected 400, got 200 (silently truncated to 'US')
+          Root cause (viral.py set_country):
+            country = (body.get('country') or '').upper()[:2]
+            if not country.isalpha() or len(country) != 2: 400
+          Because [:2] runs BEFORE validation, 'USA' becomes 'US' and passes.
+          Fix: validate raw input length first.
+            raw = (body.get('country') or '').strip()
+            if len(raw) != 2 or not raw.isalpha(): raise 400
+            country = raw.upper()
+
+        [FAIL] WS /api/live/spectate/{game_id} for non-existent game does NOT send
+               {type:'error', detail:'Game not active'}; client just hangs.
+          Backend log: "RuntimeWarning: coroutine 'GameManager.get' was never awaited"
+          Root cause (viral.py spectate_ws + server.py wiring):
+            server.py passes lambda: _live_games_manager (a GameManager instance) as
+            get_realtime_rooms. viral.py treats it as a dict via rooms_dict.get(game_id)
+            — but GameManager.get is async, so it returns a truthy coroutine. The handler
+            enters the `if room:` branch, then room.get('fen') raises AttributeError, gets
+            swallowed by bare `except Exception: pass`. The error frame is never emitted.
+          Fix options:
+            (a) In server.py expose a snapshot dict view of currently-ongoing games:
+                  get_realtime_rooms=lambda: {
+                    gid: {"fen": g.board.fen(), "moves": g.moves_san,
+                          "white_user": g.players['w'], "black_user": g.players['b'],
+                          "rule_key": g.rule_key}
+                    for gid,g in _live_games_manager.games.items() if g.status=='ongoing'
+                  }
+            (b) Or in viral.py, do `gm = get_realtime_rooms(); g = getattr(gm,'games',{}).get(game_id)`
+                and access LiveGame attributes directly. Either way the missing-game branch
+                must reach `await ws.send_json({"type":"error", "detail":"Game not active"})`.
+
+        Apart from these two validation/wiring bugs, the entire viral surface
+        (tournaments, leaderboards, badges, share, featured) is functioning correctly.
