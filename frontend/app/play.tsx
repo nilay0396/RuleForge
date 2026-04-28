@@ -19,6 +19,7 @@ import Chessboard from '../src/components/Chessboard';
 import Button from '../src/components/Button';
 import { RuleChess, RuleKey, SquareName, LegalTarget } from '../src/engine';
 import { chooseAIMove, AILevel } from '../src/ai';
+import { playSound } from '../src/sound';
 
 const TIMER_OPTIONS: { key: string; label: string; seconds: number | null }[] = [
   { key: 'casual', label: 'Casual', seconds: null },
