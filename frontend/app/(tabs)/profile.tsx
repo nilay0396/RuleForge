@@ -27,13 +27,15 @@ export default function Profile() {
   const { user, signOut, refresh } = useAuth();
   const router = useRouter();
   const [matches, setMatches] = useState<any[]>([]);
+  const [history, setHistory] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [m] = await Promise.all([api.myMatches()]);
+      const [m, h] = await Promise.all([api.myMatches(), api.ratingHistory()]);
       setMatches(m.matches);
+      setHistory(h.history);
       await refresh();
     } catch {}
     setLoading(false);
@@ -60,7 +62,7 @@ export default function Profile() {
         </View>
 
         <View style={styles.statsCard}>
-          <Stat value={user?.elo ?? 1000} label="ELO" testID="profile-elo" />
+          <Stat value={user?.elo ?? 800} label="ELO" testID="profile-elo" />
           <Divider />
           <Stat value={user?.xp ?? 0} label="XP" testID="profile-xp" />
           <Divider />
@@ -91,6 +93,28 @@ export default function Profile() {
               })
             )}
           </View>
+        </Section>
+
+        <Section title="Rating Trend" subtitle={history.length > 0 ? `Last ${Math.min(history.length, 8)} games` : 'Play to start your trend'}>
+          {history.length === 0 ? (
+            <Text style={styles.empty}>Your rating history will appear here.</Text>
+          ) : (
+            <View style={styles.trendRow} testID="rating-trend">
+              {history.slice(0, 8).reverse().map((h, i) => (
+                <View key={h.id || i} style={styles.trendCell}>
+                  <Text
+                    style={[
+                      styles.trendDelta,
+                      { color: h.delta >= 0 ? colors.success : colors.danger },
+                    ]}
+                  >
+                    {h.delta >= 0 ? `+${h.delta}` : h.delta}
+                  </Text>
+                  <Text style={styles.trendAfter}>{h.rating_after}</Text>
+                </View>
+              ))}
+            </View>
+          )}
         </Section>
 
         <Section title="Match History" subtitle={`${totalGames} games played`}>
@@ -242,6 +266,22 @@ const styles = StyleSheet.create({
   matchDelta: { fontWeight: '900' },
   linkBtn: { paddingVertical: spacing.md },
   linkText: { color: colors.textPrimary, fontWeight: '700' },
+  trendRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: radii.md,
+    padding: spacing.md,
+  },
+  trendCell: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: spacing.xs,
+  },
+  trendDelta: { fontSize: 12, fontWeight: '900' },
+  trendAfter: { color: colors.textSecondary, fontSize: 11, marginTop: 2 },
 });
 
 const statStyles = StyleSheet.create({

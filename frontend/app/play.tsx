@@ -57,6 +57,12 @@ export default function Play() {
   const [aiThinking, setAiThinking] = useState(false);
   const [gameOver, setGameOver] = useState<{ result: 'win' | 'loss' | 'draw'; reason: string } | null>(null);
   const [matchSubmitted, setMatchSubmitted] = useState(false);
+  const [eloChange, setEloChange] = useState<{ before: number; after: number; delta: number } | null>(null);
+  // Undo is allowed only between AI's reply and the player's next move.
+  const [canUndo, setCanUndo] = useState(false);
+  // Confirmation modals
+  const [confirmAbort, setConfirmAbort] = useState(false);
+  const [confirmNew, setConfirmNew] = useState(false);
 
   // Timers (per side, seconds remaining). null means no timer.
   const initial = TIMER_OPTIONS.find((t) => t.key === timerKey)!.seconds;
@@ -101,16 +107,26 @@ export default function Play() {
       try {
         const m = chooseAIMove(rcRef.current, aiLevel);
         if (m) {
+          const fenBefore = rcRef.current.fen();
+          const wasCapture = !!rcRef.current.pieceAt(m.to as SquareName);
           rcRef.current.move(m.from as SquareName, m.to as SquareName, {
             promotion: (m.promotion as any) || 'q',
           });
+          const isCheck = rcRef.current.inCheck();
+          if (isCheck) playSound('check');
+          else if (wasCapture) playSound('capture');
+          else playSound('move');
           checkOutcome();
+          // After AI replies, player is allowed to undo their previous move pair.
+          setCanUndo(rcRef.current.historySAN().length >= 2 && !rcRef.current.isGameOver());
+          // Acknowledge fenBefore for non-undefined linting
+          void fenBefore;
           bump();
         }
       } finally {
         setAiThinking(false);
       }
-    }, 350);
+    }, 250);
     return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tick, showRuleModal, gameOver]);
@@ -157,8 +173,15 @@ export default function Play() {
           setPendingPromotion({ from: selected, to: sq });
           return;
         }
+        const wasCapture = !!rcRef.current.pieceAt(sq);
         const ok = rcRef.current.move(selected, sq, { promotion: target.promotion });
         if (ok) {
+          // Lock undo on player move (consumes any pending undo right).
+          setCanUndo(false);
+          const isCheck = rcRef.current.inCheck();
+          if (isCheck) playSound('check');
+          else if (wasCapture) playSound('capture');
+          else playSound('move');
           setSelected(null);
           setLegalTargets([]);
           checkOutcome();
@@ -212,6 +235,8 @@ export default function Play() {
   const endGame = async (result: 'win' | 'loss' | 'draw', reason: string) => {
     if (gameOver) return;
     setGameOver({ result, reason });
+    setCanUndo(false);
+    playSound('end');
     if (matchSubmitted) return;
     setMatchSubmitted(true);
     try {
@@ -224,7 +249,15 @@ export default function Play() {
         duration_seconds: 0,
         ai_level: aiLevel,
       });
-      if (r.user) setUser(r.user);
+      if (r.user) {
+        const oldElo = user?.elo ?? 800;
+        setUser(r.user);
+        setEloChange({
+          before: oldElo,
+          after: r.user.elo,
+          delta: r.user.elo - oldElo,
+        });
+      }
       if (isDaily && result !== 'loss') {
         try {
           const d = await api.submitDaily(rcRef.current.historySAN(), true);
@@ -236,13 +269,20 @@ export default function Play() {
   };
 
   const undo = () => {
-    if (aiThinking || gameOver) return;
-    // Undo AI's last move + player's last move
+    if (!canUndo || aiThinking || gameOver) return;
+    // Revert AI's last move + player's last move (one full pair).
     rcRef.current.undo();
     rcRef.current.undo();
     setSelected(null);
     setLegalTargets([]);
+    setCanUndo(false);
     bump();
+  };
+
+  const abortGame = () => {
+    // Only allowed if no moves have been played
+    if (rcRef.current.historySAN().length > 0) return;
+    router.replace('/home');
   };
 
   const newGame = () => {
@@ -254,6 +294,8 @@ export default function Play() {
     setGameOver(null);
     setMatchSubmitted(false);
     setPendingPromotion(null);
+    setCanUndo(false);
+    setEloChange(null);
     const s = TIMER_OPTIONS.find((t) => t.key === timerKey)!.seconds;
     setWhiteTime(s);
     setBlackTime(s);
@@ -280,6 +322,8 @@ export default function Play() {
     return pairs;
   }, [tick]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const moveListRef = useRef<ScrollView | null>(null);
+
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
       {/* Header */}
@@ -304,10 +348,15 @@ export default function Play() {
       {/* Opponent header */}
       <PlayerStrip
         name="RuleForge AI"
-        sub={`Bot · Level ${aiLevel}`}
+        sub={
+          aiThinking
+            ? `Bot · Level ${aiLevel} · thinking...`
+            : `Bot · Level ${aiLevel}`
+        }
         time={blackTime}
         active={rcRef.current.turn() === 'b' && !gameOver && !showRuleModal}
         captures={countCaptures(rcRef.current, 'w')}
+        thinking={aiThinking}
       />
 
       {/* Board */}
@@ -322,18 +371,12 @@ export default function Play() {
           size={boardSize}
           onSquarePress={onSquarePress}
         />
-        {aiThinking && (
-          <View style={styles.thinkingOverlay} pointerEvents="none">
-            <ActivityIndicator color={accent} />
-            <Text style={styles.thinkingText}>AI thinking...</Text>
-          </View>
-        )}
       </View>
 
       {/* Player header */}
       <PlayerStrip
         name={user?.name || 'You'}
-        sub={`You · ${user?.elo ?? 1000} ELO${inCheck && rcRef.current.turn() === 'w' ? ' · CHECK!' : ''}`}
+        sub={`You · ${user?.elo ?? 800} ELO${inCheck && rcRef.current.turn() === 'w' ? ' · CHECK!' : ''}`}
         time={whiteTime}
         active={rcRef.current.turn() === 'w' && !gameOver && !showRuleModal}
         captures={countCaptures(rcRef.current, 'b')}
@@ -341,8 +384,17 @@ export default function Play() {
 
       {/* Action bar */}
       <View style={styles.actionBar}>
-        <ActionBtn label="Undo" onPress={undo} testID="play-undo" disabled={aiThinking || rcRef.current.historySAN().length < 2} />
-        <ActionBtn label="New game" onPress={newGame} testID="play-new" />
+        <ActionBtn
+          label="Undo"
+          onPress={undo}
+          testID="play-undo"
+          disabled={!canUndo || aiThinking}
+        />
+        {rcRef.current.historySAN().length === 0 ? (
+          <ActionBtn label="Abort" onPress={() => setConfirmAbort(true)} testID="play-abort" />
+        ) : (
+          <ActionBtn label="New game" onPress={() => setConfirmNew(true)} testID="play-new" />
+        )}
         {ruleKey === 'swap_move' && (
           <ActionBtn
             label={swapMode ? 'Cancel swap' : 'Swap'}
@@ -368,17 +420,29 @@ export default function Play() {
       </View>
 
       {/* Move list */}
-      <ScrollView style={styles.moveList} contentContainerStyle={{ padding: spacing.sm }} horizontal showsHorizontalScrollIndicator={false}>
+      <ScrollView
+        ref={moveListRef}
+        style={styles.moveList}
+        contentContainerStyle={{ padding: spacing.sm }}
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        onContentSizeChange={() => moveListRef.current?.scrollToEnd({ animated: true })}
+      >
         {movesPairs.length === 0 ? (
           <Text style={styles.movesEmpty}>Game starts here.</Text>
         ) : (
-          movesPairs.map((p) => (
-            <View key={p.num} style={styles.movePair}>
-              <Text style={styles.moveNum}>{p.num}.</Text>
-              <Text style={styles.moveSan}>{p.w}</Text>
-              {p.b ? <Text style={styles.moveSan}>{p.b}</Text> : null}
-            </View>
-          ))
+          movesPairs.map((p, i) => {
+            const isLastPair = i === movesPairs.length - 1;
+            return (
+              <View key={p.num} style={styles.movePair}>
+                <Text style={styles.moveNum}>{p.num}.</Text>
+                <Text style={[styles.moveSan, isLastPair && !p.b && styles.moveSanCurrent]}>{p.w}</Text>
+                {p.b ? (
+                  <Text style={[styles.moveSan, isLastPair && styles.moveSanCurrent]}>{p.b}</Text>
+                ) : null}
+              </View>
+            );
+          })
         )}
       </ScrollView>
 
@@ -511,18 +575,23 @@ function PlayerStrip({
   time,
   active,
   captures,
+  thinking,
 }: {
   name: string;
   sub: string;
   time: number | null;
   active: boolean;
   captures: string;
+  thinking?: boolean;
 }) {
   return (
     <View style={[styles.player, active && { borderColor: colors.accent }]}>
       <View style={[styles.playerDot, { backgroundColor: active ? colors.accent : colors.border }]} />
       <View style={{ flex: 1 }}>
-        <Text style={styles.playerName}>{name}</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <Text style={styles.playerName}>{name}</Text>
+          {thinking ? <ActivityIndicator size="small" color={colors.accent} /> : null}
+        </View>
         <Text style={styles.playerSub}>
           {sub}
           {captures ? `   ·   ${captures}` : ''}
@@ -677,6 +746,20 @@ const styles = StyleSheet.create({
   movePair: { flexDirection: 'row', gap: 6, marginRight: spacing.md, alignItems: 'baseline' },
   moveNum: { color: colors.textMuted, fontSize: 12 },
   moveSan: { color: colors.textPrimary, fontSize: 13, fontWeight: '700' },
+  moveSanCurrent: { color: colors.accent, backgroundColor: 'rgba(234,179,8,0.12)', paddingHorizontal: 4, borderRadius: 4 },
+  eloChangeRow: { marginTop: spacing.lg, flexDirection: 'row', gap: spacing.md },
+  eloChangeBlock: {
+    flex: 1,
+    backgroundColor: colors.elevated,
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: radii.md,
+    padding: spacing.md,
+  },
+  eloChangeLabel: { color: colors.textMuted, fontSize: 10, fontWeight: '900', letterSpacing: 2 },
+  eloChangeValue: { color: colors.textPrimary, fontSize: 28, fontWeight: '900', marginTop: 4 },
+  eloChangeDelta: { fontSize: 16, fontWeight: '900' },
+  eloChangeWas: { color: colors.textMuted, fontSize: 11, marginTop: 2 },
   modalScrim: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.7)',

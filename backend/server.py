@@ -224,7 +224,7 @@ async def register(payload: RegisterIn):
         "is_guest": False,
         "xp": 0,
         "coins": 100,
-        "elo": 1000,
+        "elo": 800,
         "streak": 0,
         "longest_streak": 0,
         "badges": [],
@@ -264,7 +264,7 @@ async def guest_login():
         "is_guest": True,
         "xp": 0,
         "coins": 50,
-        "elo": 1000,
+        "elo": 800,
         "streak": 0,
         "longest_streak": 0,
         "badges": [],
@@ -336,11 +336,14 @@ def _award_for_result(result: str) -> int:
     return {"win": WIN_XP, "draw": DRAW_XP, "loss": LOSE_XP}.get(result, 0)
 
 
-def _elo_delta(result: str, ai_level: Optional[int]) -> int:
-    base = {"win": 12, "draw": 2, "loss": -8}.get(result, 0)
-    if ai_level is not None:
-        base += (ai_level - 2) * 2  # bonus for harder bots
-    return base
+def _ai_opponent_rating(ai_level: Optional[int]) -> int:
+    return {1: 600, 2: 900, 3: 1200, 4: 1500}.get(ai_level or 2, 900)
+
+
+def _elo_delta(player_rating: int, opponent_rating: int, result: str, k: int = 32) -> int:
+    score = {"win": 1.0, "draw": 0.5, "loss": 0.0}.get(result, 0.0)
+    expected = 1.0 / (1.0 + 10 ** ((opponent_rating - player_rating) / 400))
+    return int(round(k * (score - expected)))
 
 
 @api.post("/matches")
@@ -348,7 +351,10 @@ async def record_match(payload: MatchIn, user: Dict[str, Any] = Depends(current_
     match_id = str(uuid.uuid4())
     xp_gain = _award_for_result(payload.result)
     coin_gain = 10 if payload.result == "win" else 2
-    elo_delta = _elo_delta(payload.result, payload.ai_level)
+    rating_before = int(user.get("elo", 800))
+    opponent_rating = _ai_opponent_rating(payload.ai_level)
+    elo_delta = _elo_delta(rating_before, opponent_rating, payload.result)
+    rating_after = max(100, rating_before + elo_delta)
     match_doc = {
         "id": match_id,
         "user_id": user["id"],
@@ -362,19 +368,36 @@ async def record_match(payload: MatchIn, user: Dict[str, Any] = Depends(current_
         "xp_gain": xp_gain,
         "coin_gain": coin_gain,
         "elo_delta": elo_delta,
+        "rating_before": rating_before,
+        "rating_after": rating_after,
+        "opponent_rating": opponent_rating,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.matches.insert_one(match_doc)
 
+    # Rating history entry
+    await db.rating_history.insert_one({
+        "id": str(uuid.uuid4()),
+        "user_id": user["id"],
+        "match_id": match_id,
+        "rating_before": rating_before,
+        "rating_after": rating_after,
+        "opponent_rating": opponent_rating,
+        "delta": elo_delta,
+        "result": payload.result,
+        "rule_key": payload.rule_key,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+
     # Update user stats
     result_field = {"win": "wins", "loss": "losses", "draw": "draws"}.get(payload.result, "draws")
-    inc = {
-        "xp": xp_gain,
-        "coins": coin_gain,
-        "elo": elo_delta,
-        result_field: 1,
-    }
-    await db.users.update_one({"id": user["id"]}, {"$inc": inc})
+    await db.users.update_one(
+        {"id": user["id"]},
+        {
+            "$inc": {"xp": xp_gain, "coins": coin_gain, result_field: 1},
+            "$set": {"elo": rating_after},
+        },
+    )
 
     # Badge logic
     user2 = await db.users.find_one({"id": user["id"]}, {"_id": 0})
@@ -396,6 +419,121 @@ async def record_match(payload: MatchIn, user: Dict[str, Any] = Depends(current_
 async def my_matches(user: Dict[str, Any] = Depends(current_user)):
     matches = await db.matches.find({"user_id": user["id"]}, {"_id": 0}).sort("created_at", -1).to_list(50)
     return {"matches": matches}
+
+
+@api.get("/rating/history")
+async def rating_history(user: Dict[str, Any] = Depends(current_user)):
+    rows = await db.rating_history.find(
+        {"user_id": user["id"]}, {"_id": 0}
+    ).sort("created_at", -1).to_list(100)
+    return {"history": rows}
+
+
+# Guided scenarios per rule (board position + the one move the player must find).
+SCENARIOS: Dict[str, List[Dict[str, Any]]] = {
+    "king_dash": [
+        {
+            "id": "kd1",
+            "title": "Escape the pin",
+            "rule_key": "king_dash",
+            "fen": "4k3/8/8/8/8/8/4r3/4K3 w - - 0 1",
+            "expected_uci": "e1g1",
+            "expected_type": "dash",
+            "hint": "Your king is pinned by a rook on e2. Use Dash 2 squares sideways to escape.",
+            "explanation": "King Dash lets the king sprint two squares — perfect for escaping a pin where one-square moves would still be attacked.",
+        },
+        {
+            "id": "kd2",
+            "title": "Activate the king",
+            "rule_key": "king_dash",
+            "fen": "8/8/8/8/8/8/4K3/4k3 w - - 0 1",
+            "expected_uci": "e2e4",
+            "expected_type": "dash",
+            "hint": "Walking takes too long. Dash forward two ranks to enter the action.",
+            "explanation": "In endgames, an active king wins. Dash brings yours into play in a single tempo.",
+        },
+        {
+            "id": "kd3",
+            "title": "Diagonal getaway",
+            "rule_key": "king_dash",
+            "fen": "8/8/8/8/8/3r4/4K3/8 w - - 0 1",
+            "expected_uci": "e2g4",
+            "expected_type": "dash",
+            "hint": "The d-file is dangerous. Dash diagonally to safety on g4.",
+            "explanation": "Dash also works diagonally — two squares in a straight line in any direction.",
+        },
+    ],
+    "power_pawns": [
+        {
+            "id": "pp1",
+            "title": "Slide to support",
+            "rule_key": "power_pawns",
+            "fen": "4k3/8/8/4P3/8/8/8/4K3 w - - 0 1",
+            "expected_uci": "e5d5",
+            "expected_type": "sideways",
+            "hint": "Your pawn on e5 just gained sideways power. Slide it to d5 for a better route.",
+            "explanation": "On rank 5+, white pawns may slide one square sideways to an empty square — non-capturing.",
+        },
+        {
+            "id": "pp2",
+            "title": "Sidestep the blocker",
+            "rule_key": "power_pawns",
+            "fen": "4k3/8/8/3pP3/8/8/8/4K3 w - - 0 1",
+            "expected_uci": "e5f5",
+            "expected_type": "sideways",
+            "hint": "The pawn ahead of you blocks promotion. Slide to f5 and find a clear file.",
+            "explanation": "Power Pawns let you reroute around blockades on the way to promotion.",
+        },
+        {
+            "id": "pp3",
+            "title": "Connect your pawns",
+            "rule_key": "power_pawns",
+            "fen": "4k3/8/8/P3P3/8/8/8/4K3 w - - 0 1",
+            "expected_uci": "e5d5",
+            "expected_type": "sideways",
+            "hint": "Two passed pawns, far apart. Slide e5 to d5 — they support each other.",
+            "explanation": "Sideways slides let isolated pawns regroup into devastating connected pairs.",
+        },
+    ],
+    "swap_move": [
+        {
+            "id": "sm1",
+            "title": "Swap into action",
+            "rule_key": "swap_move",
+            "fen": "4k3/8/8/8/8/8/8/RN2K3 w - - 0 1",
+            "expected_uci": "swap:a1b1",
+            "expected_type": "swap",
+            "hint": "Your rook is stuck in the corner while a knight blocks. Use Swap to put the rook on b1 and knight on a1.",
+            "explanation": "Swap Move trades positions of any two of your own non-king pieces — instantly fixing structural problems.",
+        },
+        {
+            "id": "sm2",
+            "title": "Defend the king",
+            "rule_key": "swap_move",
+            "fen": "4k3/8/8/8/8/8/4K3/3B1N2 w - - 0 1",
+            "expected_uci": "swap:d1f1",
+            "expected_type": "swap",
+            "hint": "Swap your bishop and knight so the bishop covers the long diagonal.",
+            "explanation": "When ideal piece placement is across the board, Swap saves you many tempi.",
+        },
+        {
+            "id": "sm3",
+            "title": "Reroute for attack",
+            "rule_key": "swap_move",
+            "fen": "4k3/8/8/8/8/8/8/R3K2R w - - 0 1",
+            "expected_uci": "swap:a1h1",
+            "expected_type": "swap",
+            "hint": "Swap the rooks to surprise the opponent on the side they don't expect.",
+            "explanation": "Use Swap once per game — wisely. It can be a game-changing attack setup.",
+        },
+    ],
+    "classic": [],
+}
+
+
+@api.get("/rules/{key}/scenarios")
+async def rule_scenarios(key: str):
+    return {"scenarios": SCENARIOS.get(key, [])}
 
 
 # -----------------------------------------------------------------------------
@@ -754,7 +892,7 @@ async def seed_test_user():
             "name": "Test Player",
             "role": "user",
             "is_guest": False,
-            "xp": 0, "coins": 100, "elo": 1000,
+            "xp": 0, "coins": 100, "elo": 800,
             "streak": 0, "longest_streak": 0, "badges": [],
             "wins": 0, "losses": 0, "draws": 0,
             "premium": False, "avatar": None,

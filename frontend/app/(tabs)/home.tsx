@@ -63,7 +63,7 @@ export default function Home() {
             </Text>
           </View>
           <View style={styles.statsRow}>
-            <Stat label="ELO" value={user?.elo ?? 1000} testID="home-elo" />
+            <Stat label="ELO" value={user?.elo ?? 800} testID="home-elo" />
             <Stat label="XP" value={user?.xp ?? 0} testID="home-xp" />
             <Stat label="COINS" value={user?.coins ?? 0} testID="home-coins" />
           </View>

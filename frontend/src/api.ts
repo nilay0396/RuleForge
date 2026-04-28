@@ -71,11 +71,14 @@ export const api = {
   // Content
   rules: () => request<{ rules: any[] }>('/rules', {}, false),
   rule: (key: string) => request<{ rule: any; quizzes: any[] }>(`/rules/${key}`, {}, false),
+  scenarios: (key: string) =>
+    request<{ scenarios: any[] }>(`/rules/${key}/scenarios`, {}, false),
 
   // Matches
   recordMatch: (body: any) =>
     request<{ match: any; user: any }>('/matches', { method: 'POST', body: JSON.stringify(body) }),
   myMatches: () => request<{ matches: any[] }>('/matches/me'),
+  ratingHistory: () => request<{ history: any[] }>('/rating/history'),
 
   // Daily
   daily: () => request<{ challenge: any; completed: boolean }>('/daily'),

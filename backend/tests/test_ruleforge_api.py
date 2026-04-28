@@ -32,7 +32,7 @@ class TestAuth:
         user = data["user"]
         assert user["email"] == email
         assert user["is_guest"] is False
-        assert user["xp"] == 0 and user["coins"] == 100 and user["elo"] == 1000
+        assert user["xp"] == 0 and user["coins"] == 100 and user["elo"] == 800
 
         me = api_client.get(
             f"{BASE_URL}/api/auth/me",

@@ -1,0 +1,49 @@
+{
+  "summary": "Iteration 2 testing. Backend: 32/32 pytest pass (8 new iteration-2 tests + 24 regression). Frontend Expo web preview tested on mobile viewport. Scenarios (king_dash kd1, swap_move sm1), rating-trend on profile, and play rule modal with timer chips all work. BUT four iteration-2 UI features are broken/missing and must be fixed by main agent.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "app/play.tsx", "issue": "confirm-abort-yes / confirm-abort-no modal is not rendered. setConfirmAbort(true) is called on play-abort tap but no <Modal visible={confirmAbort}> exists in the JSX tree.", "testID": "confirm-abort-yes/confirm-abort-no", "priority": "HIGH"},
+      {"component": "app/play.tsx", "issue": "confirm-new-yes / confirm-new-no modal is not rendered. State exists but no Modal consumes it. play-new onPress fires setConfirmNew(true) which silently does nothing.", "testID": "confirm-new-yes/confirm-new-no", "priority": "HIGH"},
+      {"component": "app/play.tsx", "issue": "play-new button never appears. The conditional uses rcRef.current.historySAN().length (a mutable ref, not state) which does not trigger a React re-render, so the action bar continues to render play-abort forever. Verified: after player move + AI reply, play-abort is still in the DOM and play-new is NOT. Should be driven by a state variable like movesPairs or a movesCount state.", "testID": "play-new", "priority": "HIGH"},
+      {"component": "app/play.tsx", "issue": "play-elo-change block is not rendered in the Game Over modal. eloChange state is declared (line 60) but the game-over modal JSX (lines 450-478) shows only XP/coins reward text — no ELO before/after/delta block with testID play-elo-change.", "testID": "play-elo-change", "priority": "HIGH"},
+      {"component": "app/play.tsx", "issue": "No inline 'thinking...' sub-label was detected in opponent strip during AI move (body text scanned ~250ms and ~3s after player move did not contain the word 'thinking'). A large absolute-positioned element (300x400+) was detected while aiThinking=true — may be a full-screen overlay that the iteration-2 spec explicitly forbids. Please verify OpponentStrip shows 'thinking…' and that NO full-screen overlay blocks the board.", "testID": "opponent-strip sublabel", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "global", "issues": [
+        "Deprecation warnings persist: textShadow* and expo-audio version mismatch (expo-audio@55.0.14 vs expected ~1.1.1). Non-blocking."
+      ]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/conftest.py",
+    "/app/backend/tests/test_ruleforge_api.py",
+    "/app/backend/tests/test_iteration2.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Add <Modal visible={confirmAbort}> with buttons testID confirm-abort-yes (calls router.replace('/home') or newGame) and confirm-abort-no (setConfirmAbort(false)).",
+    "Add <Modal visible={confirmNew}> with buttons testID confirm-new-yes (newGame) and confirm-new-no (setConfirmNew(false)).",
+    "Drive Abort-vs-New-game rendering from React state (e.g. a movesCount state updated whenever a move is pushed), not rcRef.current.historySAN(). Current ref-based check never triggers a re-render.",
+    "In the Game Over <Modal>, render a block with testID='play-elo-change' showing rating_before, rating_after and a colored +/- delta from the eloChange state.",
+    "Replace any full-screen spinner during aiThinking with an inline 'thinking…' sub-label inside the OpponentStrip only (no Modal/overlay).",
+    "(Optional) `npx expo install --check` to silence expo-audio version warning."
+  ],
+  "critical_code_review_comments": [
+    "Using refs (rcRef.current.historySAN().length) to drive conditional rendering is a common React bug — refs do not trigger re-renders. Convert to state.",
+    "eloChange state is set when a match completes but never surfaced in UI — orphan state.",
+    "confirmAbort / confirmNew states are wired to onPress handlers but the corresponding Modals were never added — incomplete feature."
+  ],
+  "updated_files": [
+    "/app/backend/tests/conftest.py (BASE_URL falls back to EXPO_PUBLIC_BACKEND_URL when EXPO_BACKEND_URL unset, strips trailing slash)",
+    "/app/backend/tests/test_iteration2.py (NEW: 8 tests for fresh ELO=800, match rating fields, K=32 delta correctness, rating/history, scenarios counts+ids for all 4 rules)"
+  ],
+  "success_rate": {"backend": "100% (32/32)", "frontend": "~60% (scenarios + rating-trend + play rule modal + chessboard + AI reply work; confirm modals, play-new, play-elo-change, inline thinking label broken/missing)"},
+  "seed_data_creation": "Tests register ephemeral iter2_* users to verify fresh ELO=800 and clean rating history shape; not cleaned up but harmless.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend pytest is fully green (32/32). Frontend iteration-2 gaps are all in /app/frontend/app/play.tsx: (1) missing confirm-abort modal, (2) missing confirm-new modal, (3) play-new never rendered due to ref-based conditional, (4) missing play-elo-change block in game-over modal, (5) verify OpponentStrip sub-label shows 'thinking…' during AI move and NO full-screen overlay exists. All scenarios + profile Rating Trend already work correctly.",
+  "rca_of_issue": "play-new never appears because line 393 of play.tsx uses `rcRef.current.historySAN().length === 0` — a mutable ref read, not subscribed state. React doesn't re-render on ref mutations, so the Abort button remains mounted forever. Fix: introduce `const [moveCount, setMoveCount] = useState(0)` updated inside commitMove/undo/newGame, then branch on `moveCount === 0`. Similarly, confirmAbort/confirmNew need Modal components to render their true state with the spec'd testIDs."
+}
