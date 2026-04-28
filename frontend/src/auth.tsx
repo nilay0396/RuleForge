@@ -30,6 +30,7 @@ export type User = {
   last_reward_date?: string | null;
   daily_reward_available?: boolean;
   next_streak_if_claimed?: number;
+  is_premium?: boolean;
 };
 
 type Ctx = {

@@ -406,6 +406,19 @@ async def record_match(payload: MatchIn, user: Dict[str, Any] = Depends(current_
         },
     )
 
+    # Log wallet transaction (earnings from match)
+    if coin_gain > 0:
+        try:
+            from monetization import log_transaction as _log_tx
+            await _log_tx(
+                db, user_id=user["id"], type="earn", amount=coin_gain,
+                source=f"match_{payload.result}",
+                metadata={"match_id": match_id, "rule_key": payload.rule_key,
+                          "elo_delta": elo_delta},
+            )
+        except Exception as e:
+            logger.warning("Match transaction log failed: %s", e)
+
     # Badge logic
     user2 = await db.users.find_one({"id": user["id"]}, {"_id": 0})
     new_badges: List[str] = list(user2.get("badges", []))
@@ -964,6 +977,11 @@ async def on_startup():
         await _sp(db)
     except Exception as e:
         logger.warning("Puzzle seed issue: %s", e)
+    try:
+        from monetization import seed_store as _ss
+        await _ss(db)
+    except Exception as e:
+        logger.warning("Store seed issue: %s", e)
     logger.info("RuleForge Chess startup complete.")
 
 
@@ -988,6 +1006,11 @@ social_router = make_social_router(current_user, _db_getter)
 app.include_router(social_router, prefix="/api")
 retention_router = make_retention_router(current_user, _db_getter, None)
 app.include_router(retention_router, prefix="/api")
+
+# Monetization (wallet, store, inventory, preferences, premium, ads)
+from monetization import make_monetization_router  # noqa: E402
+monetization_router = make_monetization_router(current_user, _db_getter)
+app.include_router(monetization_router, prefix="/api")
 
 # Override the existing public_user to use the richer retention version
 public_user = retention_public_user  # noqa: F811

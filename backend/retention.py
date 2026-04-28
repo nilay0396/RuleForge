@@ -192,6 +192,16 @@ def make_retention_router(current_user_dep, db_getter, push_notification_fn):
                 },
             },
         )
+        # Wallet transaction log
+        try:
+            from monetization import log_transaction as _log_tx
+            await _log_tx(
+                db, user_id=user["id"], type="earn", amount=coins,
+                source="daily_reward",
+                metadata={"streak": new_streak, "multiplier": mult, "xp": xp},
+            )
+        except Exception:
+            pass
         updated = await db.users.find_one({"id": user["id"]}, {"_id": 0, "password_hash": 0})
         return {
             "claimed": True,
@@ -339,6 +349,17 @@ def make_retention_router(current_user_dep, db_getter, push_notification_fn):
                 "$set": {"puzzle_rating": rating_after},
             },
         )
+        # Wallet transaction log
+        if coin_gain > 0:
+            try:
+                from monetization import log_transaction as _log_tx
+                await _log_tx(
+                    db, user_id=user["id"], type="earn", amount=coin_gain,
+                    source="daily_puzzle_bonus" if (actually_solved and is_daily) else "puzzle",
+                    metadata={"puzzle_id": pid, "is_daily": is_daily, "delta": delta},
+                )
+            except Exception:
+                pass
         attempt_doc.pop("_id", None)
         updated = await db.users.find_one({"id": user["id"]}, {"_id": 0, "password_hash": 0})
         return {
@@ -400,6 +421,7 @@ def _public_user(user: Dict[str, Any]) -> Dict[str, Any]:
         "losses": int(user.get("losses", 0)),
         "draws": int(user.get("draws", 0)),
         "premium": bool(user.get("premium", False)),
+        "is_premium": bool(user.get("is_premium", user.get("premium", False))),
         "avatar": user.get("avatar"),
         "created_at": user.get("created_at"),
     }

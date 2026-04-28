@@ -1,399 +1,388 @@
 """
-Backend tests for RuleForge Chess Retention endpoints.
-Tests: daily reward, puzzles (daily/random/attempt/history/by-id).
+RuleForge Chess — Monetization backend tests (Iteration 5).
+
+Runs against the public EXPO_PUBLIC_BACKEND_URL with /api prefix.
+Uses test credentials from /app/memory/test_credentials.md.
+Performs a few direct MongoDB mutations (documented) to make tests
+deterministic (premium reset, coin top-up, ad-views reset).
 """
 from __future__ import annotations
 
-import asyncio
 import os
 import sys
+import json
 from datetime import date
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional, Tuple
 
 import requests
-from dotenv import load_dotenv
-from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import MongoClient
+from dotenv import dotenv_values
 
-# -----------------------------------------------------------------------------
-# Config
-# -----------------------------------------------------------------------------
-load_dotenv("/app/frontend/.env")
-load_dotenv("/app/backend/.env")
 
-BASE = os.environ.get("EXPO_PUBLIC_BACKEND_URL", "").rstrip("/") + "/api"
-MONGO_URL = os.environ["MONGO_URL"]
-DB_NAME = os.environ["DB_NAME"]
+# ----------------------------------------------------------------------------
+# Setup
+# ----------------------------------------------------------------------------
+FRONTEND_ENV = dotenv_values("/app/frontend/.env")
+BACKEND_ENV = dotenv_values("/app/backend/.env")
+
+BASE = (FRONTEND_ENV.get("EXPO_PUBLIC_BACKEND_URL") or "").rstrip("/")
+API = f"{BASE}/api"
+
+MONGO_URL = BACKEND_ENV.get("MONGO_URL") or "mongodb://localhost:27017"
+DB_NAME = BACKEND_ENV.get("DB_NAME") or "ruleforge_chess"
 
 EMAIL = "player1@ruleforge.app"
 PASSWORD = "Player@1234"
-NAME = "Test Player"
 
-# Track pass/fail per test section
-results: List[Dict[str, Any]] = []
-
-
-def _rec(name: str, ok: bool, detail: str = ""):
-    results.append({"name": name, "ok": ok, "detail": detail})
-    icon = "PASS" if ok else "FAIL"
-    print(f"[{icon}] {name}" + (f" — {detail}" if detail else ""))
+mongo = MongoClient(MONGO_URL)
+db = mongo[DB_NAME]
 
 
-# -----------------------------------------------------------------------------
-# Reset test user so daily reward is available (clean state)
-# -----------------------------------------------------------------------------
-async def reset_user_state():
-    c = AsyncIOMotorClient(MONGO_URL)
-    db = c[DB_NAME]
-    await db.users.update_one(
-        {"email": EMAIL},
-        {
-            "$unset": {"last_login_date": "", "last_reward_date": ""},
-            "$set": {"login_streak": 0, "puzzle_rating": 800},
-        },
-    )
-    # Clear today's puzzle attempts so daily-complete state is reset.
-    today = date.today().isoformat()
-    user = await db.users.find_one({"email": EMAIL}, {"_id": 0})
-    if user:
-        await db.puzzle_attempts.delete_many({"user_id": user["id"], "date": today})
-    # Also ensure daily_puzzles today exists only if already created (don't delete,
-    # we want to verify idempotency in step 10). Actually remove to start clean.
-    await db.daily_puzzles.delete_many({"date": today})
-    c.close()
+PASSED: list = []
+FAILED: list = []
 
 
-async def get_solution_for_puzzle(pid: str) -> Optional[List[str]]:
-    c = AsyncIOMotorClient(MONGO_URL)
-    db = c[DB_NAME]
-    p = await db.puzzles.find_one({"id": pid}, {"_id": 0})
-    c.close()
-    return p.get("solution") if p else None
+def record(label: str, ok: bool, detail: str = "") -> None:
+    if ok:
+        PASSED.append(label)
+        print(f"[PASS] {label} {detail}")
+    else:
+        FAILED.append((label, detail))
+        print(f"[FAIL] {label} :: {detail}")
 
 
-# -----------------------------------------------------------------------------
-# Helpers
-# -----------------------------------------------------------------------------
-def register_or_login() -> str:
-    """Return a JWT token for player1."""
-    # Try login first
-    r = requests.post(f"{BASE}/auth/login", json={"email": EMAIL, "password": PASSWORD}, timeout=20)
-    if r.status_code == 200:
-        return r.json()["token"]
-    # Else register
-    r = requests.post(
-        f"{BASE}/auth/register",
-        json={"email": EMAIL, "password": PASSWORD, "name": NAME},
-        timeout=20,
-    )
-    if r.status_code == 200:
-        return r.json()["token"]
-    if r.status_code == 400 and "already" in r.text.lower():
-        r2 = requests.post(f"{BASE}/auth/login", json={"email": EMAIL, "password": PASSWORD}, timeout=20)
-        r2.raise_for_status()
-        return r2.json()["token"]
+def hdr(token: str) -> Dict[str, str]:
+    return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+
+def login_or_register():
+    r = requests.post(f"{API}/auth/login",
+                      json={"email": EMAIL, "password": PASSWORD}, timeout=15)
+    if r.status_code in (400, 401):
+        r = requests.post(f"{API}/auth/register",
+                          json={"email": EMAIL, "password": PASSWORD,
+                                "name": "Player One"}, timeout=15)
     r.raise_for_status()
-    return ""
+    data = r.json()
+    return data["token"], data["user"]
 
 
-def auth_headers(token: str) -> Dict[str, str]:
-    return {"Authorization": f"Bearer {token}"}
+def reset_user_state(user_id: str, coins: int = 1000) -> None:
+    db.users.update_one(
+        {"id": user_id},
+        {"$set": {
+            "is_premium": False,
+            "premium": False,
+            "coins": coins,
+        },
+        "$unset": {
+            "premium_since": "",
+            "premium_method": "",
+            "premium_plan": "",
+            "premium_renews_at": "",
+        }},
+    )
+    db.user_inventory.delete_many({
+        "user_id": user_id,
+        "acquired_via": {"$ne": "default"},
+    })
+    db.user_preferences.update_one(
+        {"user_id": user_id},
+        {"$set": {
+            "board_theme": "board_classic",
+            "piece_style": "piece_classic",
+            "avatar": "avatar_pawn",
+        }},
+        upsert=True,
+    )
+    db.ad_views.delete_many({"user_id": user_id})
+    db.transactions.delete_many({"user_id": user_id})
 
 
-# -----------------------------------------------------------------------------
-# Tests
-# -----------------------------------------------------------------------------
-def run():
-    print(f"Base URL: {BASE}")
-    asyncio.run(reset_user_state())
-    print("Reset user state (cleared last_reward_date, last_login_date, login_streak=0, puzzle_rating=800)")
+def set_coins(user_id: str, coins: int) -> None:
+    db.users.update_one({"id": user_id}, {"$set": {"coins": coins}})
 
-    # Login / register
-    try:
-        token = register_or_login()
-        print(f"Got token: {token[:20]}...")
-    except Exception as e:
-        _rec("Auth login/register", False, f"Exception: {e}")
-        return
-    _rec("Auth login/register", True)
 
-    H = auth_headers(token)
+def main() -> int:
+    print(f"BASE = {BASE}")
+    if not BASE:
+        print("[FATAL] EXPO_PUBLIC_BACKEND_URL not set"); return 1
 
-    # --- Step 1: GET /api/daily-reward/state ---
-    r = requests.get(f"{BASE}/daily-reward/state", headers=H, timeout=20)
-    ok = True
-    detail = ""
-    if r.status_code != 200:
-        ok = False; detail = f"HTTP {r.status_code}: {r.text[:200]}"
-    else:
-        body = r.json()
-        reward = body.get("reward", {})
-        expected = {"available": True, "next_streak_if_claimed": 1,
-                    "multiplier": 1.0, "coins": 50, "xp": 25}
-        for k, v in expected.items():
-            if reward.get(k) != v:
-                ok = False
-                detail += f" {k}={reward.get(k)} (want {v});"
-    _rec("Step 1: GET /api/daily-reward/state (fresh)", ok, detail)
+    token, user = login_or_register()
+    user_id = user["id"]
+    print(f"Logged in as {user['email']} id={user_id}")
 
-    # Capture initial user stats via /auth/me
-    r = requests.get(f"{BASE}/auth/me", headers=H, timeout=20)
-    me0 = r.json().get("user", {}) if r.status_code == 200 else {}
-    xp0 = int(me0.get("xp", 0))
-    coins0 = int(me0.get("coins", 0))
+    reset_user_state(user_id, coins=1000)
+    H = hdr(token)
 
-    # --- Step 2: POST /api/daily-reward/claim (first time) ---
-    r = requests.post(f"{BASE}/daily-reward/claim", headers=H, timeout=20)
-    ok = True; detail = ""
-    claim_body: Dict[str, Any] = {}
-    if r.status_code != 200:
-        ok = False; detail = f"HTTP {r.status_code}: {r.text[:200]}"
-    else:
-        claim_body = r.json()
-        checks = [
-            ("claimed", True),
-            ("coins", 50),
-            ("xp", 25),
-            ("multiplier", 1.0),
-            ("streak", 1),
-        ]
-        for k, v in checks:
-            if claim_body.get(k) != v:
-                ok = False
-                detail += f" {k}={claim_body.get(k)} (want {v});"
-        u = claim_body.get("user", {})
-        if u.get("coins") != coins0 + 50:
-            ok = False; detail += f" user.coins={u.get('coins')} (want {coins0+50});"
-        if u.get("xp") != xp0 + 25:
-            ok = False; detail += f" user.xp={u.get('xp')} (want {xp0+25});"
-        if u.get("login_streak") != 1:
-            ok = False; detail += f" user.login_streak={u.get('login_streak')} (want 1);"
-    _rec("Step 2: POST /api/daily-reward/claim first time", ok, detail)
+    # 1) wallet
+    r = requests.get(f"{API}/wallet", headers=H, timeout=15)
+    ok = r.status_code == 200
+    body = r.json() if ok else {}
+    schema_ok = (
+        ok and "coins" in body and "is_premium" in body
+        and isinstance(body.get("recent"), list) and len(body["recent"]) <= 20
+        and isinstance(body.get("totals"), dict)
+        and body["is_premium"] is False and int(body["coins"]) == 1000
+    )
+    record("1. GET /api/wallet schema", schema_ok,
+           f"status={r.status_code} body={body if not schema_ok else 'ok'}")
 
-    # --- Step 2b: Claim again same day ---
-    r = requests.post(f"{BASE}/daily-reward/claim", headers=H, timeout=20)
-    ok = True; detail = ""
-    if r.status_code != 200:
-        ok = False; detail = f"HTTP {r.status_code}: {r.text[:200]}"
-    else:
-        b = r.json()
-        if not b.get("already_claimed"):
-            ok = False; detail += f" already_claimed={b.get('already_claimed')};"
-        if "reward" not in b:
-            ok = False; detail += " missing reward;"
-    # Also verify stats unchanged
-    r2 = requests.get(f"{BASE}/auth/me", headers=H, timeout=20)
-    if r2.status_code == 200:
-        u = r2.json().get("user", {})
-        if u.get("xp") != xp0 + 25 or u.get("coins") != coins0 + 50:
-            ok = False
-            detail += f" stats changed on 2nd claim: xp={u.get('xp')} coins={u.get('coins')};"
-    _rec("Step 2b: second claim same day returns already_claimed", ok, detail)
+    # 2) store
+    r = requests.get(f"{API}/store", headers=H, timeout=15)
+    ok = r.status_code == 200
+    body = r.json() if ok else {}
+    items = body.get("items", [])
+    grouped = body.get("grouped", {})
+    expected_keys = {
+        "board_classic", "board_emerald", "board_midnight", "board_rose", "board_obsidian",
+        "piece_classic", "piece_serif", "piece_mono", "piece_neo", "piece_aurum",
+        "avatar_pawn", "avatar_knight", "avatar_bishop", "avatar_rook",
+        "avatar_queen", "avatar_crown",
+    }
+    keys_present = {it["key"] for it in items}
+    by_key = {it["key"]: it for it in items}
+    missing = expected_keys - keys_present
+    grouped_ok = isinstance(grouped, dict) and {"board", "piece", "avatar"}.issubset(grouped.keys())
+    defaults_ok = (
+        by_key.get("board_classic", {}).get("owned") is True
+        and by_key.get("board_classic", {}).get("equipped") is True
+        and by_key.get("piece_classic", {}).get("owned") is True
+        and by_key.get("piece_classic", {}).get("equipped") is True
+        and by_key.get("avatar_pawn", {}).get("owned") is True
+        and by_key.get("avatar_pawn", {}).get("equipped") is True
+    )
+    locked_ok = (
+        by_key.get("board_obsidian", {}).get("locked_premium") is True
+        and by_key.get("piece_aurum", {}).get("locked_premium") is True
+        and by_key.get("avatar_crown", {}).get("locked_premium") is True
+    )
+    record("2. GET /api/store has 16 seeded items + grouped",
+           ok and not missing and grouped_ok,
+           f"missing={missing} status={r.status_code}")
+    record("2b. /store defaults owned+equipped", defaults_ok,
+           json.dumps({k: by_key.get(k, {}).get("equipped") for k in
+                       ["board_classic", "piece_classic", "avatar_pawn"]}))
+    record("2c. /store premium-only items locked for non-premium", locked_ok, "")
 
-    # --- Step 3: GET /api/auth/me after claim ---
-    r = requests.get(f"{BASE}/auth/me", headers=H, timeout=20)
-    ok = True; detail = ""
-    if r.status_code != 200:
-        ok = False; detail = f"HTTP {r.status_code}"
-    else:
-        u = r.json().get("user", {})
-        today = date.today().isoformat()
-        if u.get("login_streak") != 1: ok = False; detail += f" login_streak={u.get('login_streak')};"
-        if u.get("daily_reward_available") is not False: ok = False; detail += f" daily_reward_available={u.get('daily_reward_available')};"
-        if u.get("last_reward_date") != today: ok = False; detail += f" last_reward_date={u.get('last_reward_date')} (want {today});"
-        if not isinstance(u.get("level"), int) or u.get("level") < 1: ok = False; detail += f" level={u.get('level')};"
-        if not isinstance(u.get("level_progress"), int): ok = False; detail += f" level_progress={u.get('level_progress')};"
-        if not isinstance(u.get("level_needed"), int): ok = False; detail += f" level_needed={u.get('level_needed')};"
-        if not isinstance(u.get("puzzle_rating"), int): ok = False; detail += f" puzzle_rating={u.get('puzzle_rating')};"
-    _rec("Step 3: GET /api/auth/me reflects retention fields", ok, detail)
+    # 3) buy
+    set_coins(user_id, 200)
+    r = requests.post(f"{API}/store/board_emerald/buy", headers=H, timeout=15)
+    record("3a. buy board_emerald with 200 coins → 402",
+           r.status_code == 402, f"got={r.status_code}")
 
-    # --- Step 4: GET /api/puzzles/daily ---
-    r = requests.get(f"{BASE}/puzzles/daily", headers=H, timeout=20)
-    ok = True; detail = ""
-    daily_puzzle_id = None
-    if r.status_code != 200:
-        ok = False; detail = f"HTTP {r.status_code}: {r.text[:200]}"
-    else:
-        b = r.json()
-        for k in ("daily", "puzzle", "completed"):
-            if k not in b: ok = False; detail += f" missing {k};"
-        puzzle = b.get("puzzle") or {}
-        if "solution" in puzzle: ok = False; detail += " puzzle leaks 'solution';"
-        for k in ("id", "title", "theme", "rating", "fen", "hint", "solution_length"):
-            if k not in puzzle: ok = False; detail += f" puzzle missing {k};"
-        if puzzle.get("solution_length") != 1:
-            ok = False; detail += f" solution_length={puzzle.get('solution_length')} (want 1);"
-        if b.get("completed") is not False:
-            ok = False; detail += f" completed={b.get('completed')} (want False);"
-        daily_puzzle_id = puzzle.get("id")
-    _rec("Step 4: GET /api/puzzles/daily", ok, detail)
+    set_coins(user_id, 500)
+    r = requests.post(f"{API}/store/board_emerald/buy", headers=H, timeout=15)
+    ok = r.status_code == 200
+    body = r.json() if ok else {}
+    buy_ok = (ok and body.get("ok") is True
+              and body.get("price_paid") == 300
+              and body.get("coins") == 200)
+    record("3b. buy board_emerald with 500 coins → 200 coins=200 price=300",
+           buy_ok, f"status={r.status_code} body={body}")
 
-    # --- Step 5: GET /api/puzzles/random ---
-    r = requests.get(f"{BASE}/puzzles/random", headers=H, timeout=20)
-    ok = True; detail = ""
-    random_puzzle: Dict[str, Any] = {}
-    if r.status_code != 200:
-        ok = False; detail = f"HTTP {r.status_code}: {r.text[:200]}"
-    else:
-        random_puzzle = r.json().get("puzzle") or {}
-        if "solution" in random_puzzle: ok = False; detail += " leaks 'solution';"
-        if random_puzzle.get("solution_length") != 1:
-            ok = False; detail += f" solution_length={random_puzzle.get('solution_length')} (want 1);"
-        # rating within ±150 of 800 (user puzzle_rating is 800 default)
-        pr = 800
-        rr = random_puzzle.get("rating", 0)
-        if not (pr - 150 <= rr <= pr + 150):
-            # Main agent allows widening, so soft check
-            detail += f" (Minor: rating={rr} outside ±150 of {pr}, tolerance expanded)"
-    _rec("Step 5: GET /api/puzzles/random", ok, detail)
+    tx = db.transactions.find_one({
+        "user_id": user_id, "type": "spend",
+        "source": "store_purchase", "amount": 300,
+    })
+    record("3c. spend/store_purchase/300 transaction recorded",
+           tx is not None, "")
 
-    # --- Step 6: POST /api/puzzles/{id}/attempt wrong move on a random puzzle ---
-    # Use a different random puzzle id (not daily) to keep daily uncompleted.
-    rand_id = random_puzzle.get("id")
-    # If random happened to be same as daily, fetch another.
-    tries = 0
-    while rand_id == daily_puzzle_id and tries < 5:
-        r = requests.get(f"{BASE}/puzzles/random", headers=H, timeout=20)
-        if r.status_code == 200:
-            random_puzzle = r.json().get("puzzle") or {}
-            rand_id = random_puzzle.get("id")
-        tries += 1
+    r = requests.post(f"{API}/store/board_emerald/buy", headers=H, timeout=15)
+    record("3d. duplicate buy board_emerald → 400 Already owned",
+           r.status_code == 400, f"got={r.status_code}")
 
-    # Pre-attempt user stats
-    r = requests.get(f"{BASE}/auth/me", headers=H, timeout=20)
-    pre_user = r.json().get("user", {}) if r.status_code == 200 else {}
-    pre_xp = int(pre_user.get("xp", 0))
-    pre_pr = int(pre_user.get("puzzle_rating", 800))
+    r = requests.post(f"{API}/store/board_obsidian/buy", headers=H, timeout=15)
+    record("3e. buy board_obsidian as non-premium → 403",
+           r.status_code == 403, f"got={r.status_code}")
 
-    payload = {"moves": ["a2a3"], "success": True, "time_taken_ms": 1234, "used_hint": False}
-    r = requests.post(f"{BASE}/puzzles/{rand_id}/attempt", headers=H, json=payload, timeout=20)
-    ok = True; detail = ""
-    if r.status_code != 200:
-        ok = False; detail = f"HTTP {r.status_code}: {r.text[:200]}"
-    else:
-        b = r.json()
-        for k in ("attempt", "rating_before", "rating_after", "delta", "xp_gain", "coin_gain", "user", "solution"):
-            if k not in b: ok = False; detail += f" missing {k};"
-        if b.get("solution") is not None:
-            ok = False; detail += f" solution leaked on fail: {b.get('solution')};"
-        if b.get("xp_gain") != 5: ok = False; detail += f" xp_gain={b.get('xp_gain')} (want 5);"
-        if b.get("coin_gain") != 0: ok = False; detail += f" coin_gain={b.get('coin_gain')} (want 0);"
-        # delta should be <= 0 (or <=3 cushion) — enforce <= 0 per spec
-        if b.get("delta", 0) > 0:
-            ok = False; detail += f" delta={b.get('delta')} should be <=0;"
-        # attempt.status should be 'failed'
-        if b.get("attempt", {}).get("status") != "failed":
-            ok = False; detail += f" attempt.status={b.get('attempt',{}).get('status')};"
-        # user.xp should be pre_xp + 5
-        if b.get("user", {}).get("xp") != pre_xp + 5:
-            ok = False; detail += f" user.xp={b.get('user',{}).get('xp')} (want {pre_xp+5});"
-    _rec("Step 6: POST attempt wrong-move treated as failed", ok, detail)
+    # 4) preferences
+    r = requests.put(f"{API}/preferences", headers=H,
+                     json={"board_theme": "board_midnight"}, timeout=15)
+    record("4a. PUT prefs board_midnight (not owned) → 403",
+           r.status_code == 403, f"got={r.status_code}")
 
-    # --- Step 7: Successful attempt on daily puzzle ---
-    # Fetch daily puzzle details, get solution from Mongo, submit.
-    r = requests.get(f"{BASE}/puzzles/daily", headers=H, timeout=20)
-    if r.status_code != 200:
-        _rec("Step 7: POST daily puzzle success", False, f"GET daily HTTP {r.status_code}")
-    else:
-        daily_puzzle = r.json().get("puzzle") or {}
-        pid = daily_puzzle.get("id")
-        daily_puzzle_id = pid
-        solution = asyncio.run(get_solution_for_puzzle(pid))
-        if not solution:
-            _rec("Step 7: POST daily puzzle success", False, "no solution in db")
-        else:
-            # Capture pre
-            r2 = requests.get(f"{BASE}/auth/me", headers=H, timeout=20)
-            pre_user = r2.json().get("user", {})
-            pre_xp = int(pre_user.get("xp", 0))
-            pre_coins = int(pre_user.get("coins", 0))
-            pre_pr = int(pre_user.get("puzzle_rating", 800))
+    r = requests.put(f"{API}/preferences", headers=H,
+                     json={"board_theme": "board_emerald"}, timeout=15)
+    ok = r.status_code == 200
+    body = r.json() if ok else {}
+    record("4b. PUT prefs board_emerald → 200",
+           ok and body.get("preferences", {}).get("board_theme") == "board_emerald",
+           f"status={r.status_code}")
 
-            payload = {"moves": solution, "success": True, "time_taken_ms": 2500, "used_hint": False}
-            r3 = requests.post(f"{BASE}/puzzles/{pid}/attempt", headers=H, json=payload, timeout=20)
-            ok = True; detail = ""
-            if r3.status_code != 200:
-                ok = False; detail = f"HTTP {r3.status_code}: {r3.text[:200]}"
-            else:
-                b = r3.json()
-                if b.get("solution") != solution:
-                    ok = False; detail += f" solution={b.get('solution')} (want {solution});"
-                if b.get("xp_gain") != 55:
-                    ok = False; detail += f" xp_gain={b.get('xp_gain')} (want 55 = 30+25);"
-                if b.get("coin_gain") != 18:
-                    ok = False; detail += f" coin_gain={b.get('coin_gain')} (want 18 = 8+10);"
-                if b.get("attempt", {}).get("status") != "solved":
-                    ok = False; detail += f" attempt.status={b.get('attempt',{}).get('status')};"
-                if b.get("user", {}).get("puzzle_rating", 0) <= pre_pr:
-                    ok = False; detail += f" puzzle_rating did not increase ({pre_pr} → {b.get('user',{}).get('puzzle_rating')});"
-                if b.get("user", {}).get("xp") != pre_xp + 55:
-                    ok = False; detail += f" user.xp={b.get('user',{}).get('xp')} (want {pre_xp+55});"
-                if b.get("user", {}).get("coins") != pre_coins + 18:
-                    ok = False; detail += f" user.coins={b.get('user',{}).get('coins')} (want {pre_coins+18});"
-            _rec("Step 7: POST daily puzzle success (bonus applied)", ok, detail)
+    r = requests.put(f"{API}/preferences", headers=H,
+                     json={"avatar": "avatar_pawn"}, timeout=15)
+    record("4c. PUT prefs avatar_pawn (default) → 200",
+           r.status_code == 200, f"got={r.status_code}")
 
-    # --- Step 8: GET /api/puzzles/me/history ---
-    r = requests.get(f"{BASE}/puzzles/me/history", headers=H, timeout=20)
-    ok = True; detail = ""
-    if r.status_code != 200:
-        ok = False; detail = f"HTTP {r.status_code}"
-    else:
-        b = r.json()
-        for k in ("history", "solved", "total"):
-            if k not in b: ok = False; detail += f" missing {k};"
-        if b.get("total", 0) < 2:
-            ok = False; detail += f" total={b.get('total')} (want >=2 attempts from steps 6+7);"
-        if b.get("solved", 0) < 1:
-            ok = False; detail += f" solved={b.get('solved')} (want >=1);"
-    _rec("Step 8: GET /api/puzzles/me/history", ok, detail)
+    r = requests.get(f"{API}/preferences", headers=H, timeout=15)
+    body = r.json() if r.status_code == 200 else {}
+    p = body.get("preferences", {})
+    record("4d. GET /preferences reflects last set values",
+           p.get("board_theme") == "board_emerald" and p.get("avatar") == "avatar_pawn",
+           f"prefs={p}")
 
-    # --- Step 9: GET /api/puzzles/{id} ---
-    # Use the random puzzle id
-    r = requests.get(f"{BASE}/puzzles/{rand_id}", headers=H, timeout=20)
-    ok = True; detail = ""
-    if r.status_code != 200:
-        ok = False; detail = f"HTTP {r.status_code}"
-    else:
-        p = r.json().get("puzzle", {})
-        if "solution" in p: ok = False; detail += " leaks 'solution';"
-        if "solution_length" not in p: ok = False; detail += " missing solution_length;"
-        if "id" not in p: ok = False; detail += " missing id;"
-    _rec("Step 9: GET /api/puzzles/{id} hides solution", ok, detail)
+    # 5) inventory
+    r = requests.get(f"{API}/inventory", headers=H, timeout=15)
+    ok = r.status_code == 200
+    body = r.json() if ok else {}
+    inv = body.get("inventory", [])
+    keys_in_inv = {row.get("item_key") for row in inv}
+    needed = {"board_classic", "piece_classic", "avatar_pawn", "board_emerald"}
+    record("5. GET /inventory has defaults + board_emerald + equipped flags + count",
+           ok and needed.issubset(keys_in_inv)
+           and all("equipped" in row for row in inv)
+           and body.get("count") == len(inv),
+           f"keys={keys_in_inv} count={body.get('count')}")
 
-    # --- Step 10: Daily puzzle idempotency ---
-    r1 = requests.get(f"{BASE}/puzzles/daily", headers=H, timeout=20)
-    r2 = requests.get(f"{BASE}/puzzles/daily", headers=H, timeout=20)
-    ok = True; detail = ""
-    if r1.status_code != 200 or r2.status_code != 200:
-        ok = False; detail = "HTTP error"
-    else:
-        d1 = r1.json().get("daily", {}).get("id")
-        d2 = r2.json().get("daily", {}).get("id")
-        p1 = r1.json().get("puzzle", {}).get("id")
-        p2 = r2.json().get("puzzle", {}).get("id")
-        if d1 != d2 or p1 != p2:
-            ok = False; detail += f" mismatch daily_id {d1}≠{d2} or puzzle_id {p1}≠{p2};"
-    # Also verify db has exactly 1 daily_puzzles doc for today
-    async def check_daily_count():
-        c = AsyncIOMotorClient(MONGO_URL)
-        db = c[DB_NAME]
-        cnt = await db.daily_puzzles.count_documents({"date": date.today().isoformat()})
-        c.close()
-        return cnt
-    cnt = asyncio.run(check_daily_count())
-    if cnt != 1:
-        ok = False; detail += f" daily_puzzles count for today={cnt} (want 1);"
-    _rec("Step 10: Daily puzzle is deterministic / idempotent", ok, detail)
+    # 6) premium
+    r = requests.get(f"{API}/premium", headers=H, timeout=15)
+    ok = r.status_code == 200
+    body = r.json() if ok else {}
+    bids = {b["id"] for b in body.get("benefits", [])}
+    expected_bids = {"no_ads", "exclusive_themes", "extra_puzzles", "advanced_stats"}
+    price = body.get("price", {})
+    record("6. GET /premium benefits + price + is_premium=false",
+           ok and bids == expected_bids and price.get("coins") == 5000
+           and price.get("monthly_usd") and price.get("yearly_usd")
+           and body.get("is_premium") is False,
+           f"benefits={bids} price={price}")
 
-    # --- Summary ---
-    print("\n================ SUMMARY ================")
-    passed = sum(1 for x in results if x["ok"])
-    print(f"Passed {passed}/{len(results)}")
-    for x in results:
-        print(f"  [{'PASS' if x['ok'] else 'FAIL'}] {x['name']}" + (f" — {x['detail']}" if x["detail"] else ""))
-    # Exit code
-    if passed != len(results):
-        sys.exit(1)
+    # 7) subscribe mock
+    r = requests.post(f"{API}/premium/subscribe", headers=H,
+                      json={"method": "mock", "plan": "monthly"}, timeout=15)
+    ok = r.status_code == 200
+    body = r.json() if ok else {}
+    record("7a. POST /premium/subscribe mock → ok, coins_paid=0, user.is_premium=true",
+           ok and body.get("ok") is True and body.get("coins_paid") == 0
+           and body.get("user", {}).get("is_premium") is True,
+           f"status={r.status_code} body={body}")
+
+    r = requests.get(f"{API}/auth/me", headers=H, timeout=15)
+    body = r.json() if r.status_code == 200 else {}
+    me_premium = body.get("user", {}).get("is_premium") if "user" in body else body.get("is_premium")
+    record("7b. /auth/me is_premium=true after subscribe",
+           me_premium is True, f"me_premium={me_premium}")
+
+    r = requests.get(f"{API}/store", headers=H, timeout=15)
+    body = r.json() if r.status_code == 200 else {}
+    obsidian = next((it for it in body.get("items", []) if it["key"] == "board_obsidian"), None)
+    record("7c. /store board_obsidian.locked_premium=false now",
+           obsidian is not None and obsidian.get("locked_premium") is False,
+           f"obsidian.locked_premium={obsidian and obsidian.get('locked_premium')}")
+
+    # 8) equip obsidian
+    r = requests.put(f"{API}/preferences", headers=H,
+                     json={"board_theme": "board_obsidian"}, timeout=15)
+    body = r.json() if r.status_code == 200 else {}
+    record("8. PUT prefs board_obsidian as premium → 200",
+           r.status_code == 200
+           and body.get("preferences", {}).get("board_theme") == "board_obsidian",
+           f"status={r.status_code}")
+
+    # 9) cancel + try equip
+    r = requests.post(f"{API}/premium/cancel", headers=H, timeout=15)
+    record("9a. /premium/cancel → 200", r.status_code == 200, f"status={r.status_code}")
+    r = requests.get(f"{API}/auth/me", headers=H, timeout=15)
+    body = r.json() if r.status_code == 200 else {}
+    me_premium = body.get("user", {}).get("is_premium") if "user" in body else body.get("is_premium")
+    record("9b. /auth/me is_premium=false after cancel",
+           me_premium is False, f"me_premium={me_premium}")
+    requests.put(f"{API}/preferences", headers=H,
+                 json={"board_theme": "board_emerald"}, timeout=15)
+    r = requests.put(f"{API}/preferences", headers=H,
+                     json={"board_theme": "board_obsidian"}, timeout=15)
+    record("9c. PUT prefs board_obsidian after cancel → 403",
+           r.status_code == 403, f"got={r.status_code}")
+
+    # 10) ads
+    me_before = db.users.find_one({"id": user_id}) or {}
+    coins_before = int(me_before.get("coins", 0))
+    r = requests.get(f"{API}/ads/state", headers=H, timeout=15)
+    body = r.json() if r.status_code == 200 else {}
+    ads_ok = (
+        body.get("is_premium") is False
+        and body.get("available") is True
+        and body.get("remaining") == 3
+        and body.get("limit") == 3
+        and body.get("reward_coins") == 15
+    )
+    record("10a. /ads/state non-premium initial",
+           r.status_code == 200 and ads_ok, f"body={body}")
+
+    for i in range(3):
+        r = requests.post(f"{API}/ads/reward", headers=H, timeout=15)
+        record(f"10b.{i+1} POST /ads/reward call {i+1}/3",
+               r.status_code == 200, f"status={r.status_code} body={r.text[:200]}")
+
+    r = requests.post(f"{API}/ads/reward", headers=H, timeout=15)
+    record("10c. 4th /ads/reward → 429",
+           r.status_code == 429, f"got={r.status_code}")
+
+    ad_tx_count = db.transactions.count_documents({
+        "user_id": user_id, "source": "ad_view", "type": "earn",
+    })
+    record("10d. 3 ad_view transactions logged",
+           ad_tx_count == 3, f"count={ad_tx_count}")
+
+    me_after = db.users.find_one({"id": user_id}) or {}
+    coins_after = int(me_after.get("coins", 0))
+    record("10e. coins increased by 45 from 3 ads",
+           coins_after - coins_before == 45,
+           f"before={coins_before} after={coins_after}")
+
+    # 11) transactions
+    r = requests.get(f"{API}/transactions?limit=20", headers=H, timeout=15)
+    ok = r.status_code == 200
+    body = r.json() if ok else {}
+    rows = body.get("transactions", [])
+    has_spend_300 = any(t.get("type") == "spend" and t.get("source") == "store_purchase"
+                       and t.get("amount") == 300 for t in rows)
+    has_earn_15 = any(t.get("type") == "earn" and t.get("source") == "ad_view"
+                     and t.get("amount") == 15 for t in rows)
+    fields_ok = all(all(k in t for k in ("type", "source", "amount", "created_at")) for t in rows)
+    record("11. /transactions has spend(300) + earn(ad_view 15) and required fields",
+           ok and has_spend_300 and has_earn_15 and fields_ok,
+           f"len={len(rows)} spend300={has_spend_300} earn15={has_earn_15}")
+
+    # 12) wallet totals
+    r = requests.get(f"{API}/wallet", headers=H, timeout=15)
+    body = r.json() if r.status_code == 200 else {}
+    totals = body.get("totals", {})
+    earn = totals.get("earn", {})
+    spend = totals.get("spend", {})
+    record("12. /wallet totals earn={45,3} spend>=300",
+           earn.get("total") == 45 and earn.get("count") == 3
+           and spend.get("total", 0) >= 300 and spend.get("count", 0) >= 1,
+           f"totals={totals}")
+
+    # Edge cases
+    r = requests.post(f"{API}/store/non_existent/buy", headers=H, timeout=15)
+    record("E1. /store/non_existent/buy → 404",
+           r.status_code == 404, f"got={r.status_code}")
+
+    set_coins(user_id, 100)
+    r = requests.post(f"{API}/premium/subscribe", headers=H,
+                      json={"method": "coins", "plan": "monthly"}, timeout=15)
+    record("E2. /premium/subscribe coins (100<5000) → 402",
+           r.status_code == 402, f"got={r.status_code}")
+
+    db.user_inventory.delete_many({"user_id": user_id, "item_key": "avatar_knight"})
+    set_coins(user_id, 0)
+    pre_coins = int((db.users.find_one({"id": user_id}) or {}).get("coins", -1))
+    r = requests.post(f"{API}/store/avatar_knight/buy", headers=H, timeout=15)
+    post_coins = int((db.users.find_one({"id": user_id}) or {}).get("coins", -1))
+    record("E3. coins=0 buy avatar_knight (200) → 402, no DB mutation",
+           r.status_code == 402 and pre_coins == 0 and post_coins == 0,
+           f"got={r.status_code} pre={pre_coins} post={post_coins}")
+
+    print("\n========== SUMMARY ==========")
+    print(f"PASSED: {len(PASSED)}")
+    print(f"FAILED: {len(FAILED)}")
+    for label, detail in FAILED:
+        print(f"  ✗ {label} :: {detail}")
+    return 0 if not FAILED else 1
 
 
 if __name__ == "__main__":
-    run()
+    sys.exit(main())

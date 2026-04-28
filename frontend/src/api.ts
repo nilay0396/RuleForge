@@ -158,4 +158,44 @@ export const api = {
       { method: 'POST', body: JSON.stringify({ fen, uci }) },
       false,
     ),
+
+  // Monetization
+  wallet: () =>
+    request<{ coins: number; is_premium: boolean; recent: any[]; totals: Record<string, { total: number; count: number }> }>('/wallet'),
+  transactions: (limit = 50) =>
+    request<{ transactions: any[]; count: number }>(`/transactions?limit=${limit}`),
+  store: (type?: string) =>
+    request<{ items: any[]; grouped: Record<string, any[]> }>(
+      `/store${type ? `?type=${encodeURIComponent(type)}` : ''}`,
+    ),
+  storeBuy: (key: string) =>
+    request<{ ok: boolean; item_key: string; price_paid: number; coins: number; user: any }>(
+      `/store/${encodeURIComponent(key)}/buy`,
+      { method: 'POST' },
+    ),
+  inventory: () =>
+    request<{ inventory: any[]; count: number }>('/inventory'),
+  preferences: () =>
+    request<{ preferences: { board_theme: string; piece_style: string; avatar: string } }>('/preferences'),
+  setPreferences: (body: { board_theme?: string; piece_style?: string; avatar?: string }) =>
+    request<{ preferences: { board_theme: string; piece_style: string; avatar: string } }>(
+      '/preferences',
+      { method: 'PUT', body: JSON.stringify(body) },
+    ),
+  premium: () =>
+    request<{ is_premium: boolean; benefits: any[]; price: any; since: string | null; renews_at: string | null }>('/premium'),
+  premiumSubscribe: (method: 'mock' | 'coins' = 'mock', plan = 'monthly') =>
+    request<{ ok: boolean; coins_paid: number; user: any }>(
+      '/premium/subscribe',
+      { method: 'POST', body: JSON.stringify({ method, plan }) },
+    ),
+  premiumCancel: () =>
+    request<{ ok: boolean }>('/premium/cancel', { method: 'POST' }),
+  adsState: () =>
+    request<{ is_premium: boolean; available: boolean; remaining: number; limit: number; reward_coins: number }>('/ads/state'),
+  adsReward: () =>
+    request<{ ok: boolean; coins_earned: number; remaining: number; user: any }>(
+      '/ads/reward',
+      { method: 'POST' },
+    ),
 };
