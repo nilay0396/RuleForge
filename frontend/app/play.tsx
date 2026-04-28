@@ -461,6 +461,26 @@ export default function Play() {
                 : 'Draw.'}
             </Text>
             <Text style={styles.modalBody}>{gameOver?.reason}</Text>
+            {eloChange ? (
+              <View style={styles.eloChangeRow} testID="play-elo-change">
+                <View style={styles.eloChangeBlock}>
+                  <Text style={styles.eloChangeLabel}>RATING</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+                    <Text style={styles.eloChangeValue}>{eloChange.after}</Text>
+                    <Text
+                      style={[
+                        styles.eloChangeDelta,
+                        { color: eloChange.delta >= 0 ? colors.success : colors.danger },
+                      ]}
+                    >
+                      {' '}
+                      {eloChange.delta >= 0 ? `+${eloChange.delta}` : eloChange.delta}
+                    </Text>
+                  </View>
+                  <Text style={styles.eloChangeWas}>was {eloChange.before}</Text>
+                </View>
+              </View>
+            ) : null}
             <Text style={styles.modalReward}>
               {gameOver?.result === 'win'
                 ? '+25 XP · +10 coins'
@@ -473,6 +493,57 @@ export default function Play() {
             <Button label="New game" onPress={newGame} testID="play-newgame-modal" fullWidth />
             <View style={{ height: spacing.sm }} />
             <Button label="Back to home" variant="secondary" testID="play-home-modal" onPress={() => router.replace('/home')} fullWidth />
+          </View>
+        </View>
+      </Modal>
+
+      {/* Abort confirmation */}
+      <Modal visible={confirmAbort} transparent animationType="fade">
+        <View style={styles.modalScrim}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Abort game?</Text>
+            <Text style={styles.modalBody}>No moves have been played, so nothing will be recorded.</Text>
+            <View style={{ height: spacing.lg }} />
+            <Button
+              label="Yes, abort"
+              variant="danger"
+              testID="confirm-abort-yes"
+              onPress={() => { setConfirmAbort(false); abortGame(); }}
+              fullWidth
+            />
+            <View style={{ height: spacing.sm }} />
+            <Button
+              label="Cancel"
+              variant="secondary"
+              testID="confirm-abort-no"
+              onPress={() => setConfirmAbort(false)}
+              fullWidth
+            />
+          </View>
+        </View>
+      </Modal>
+
+      {/* New game confirmation */}
+      <Modal visible={confirmNew} transparent animationType="fade">
+        <View style={styles.modalScrim}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Start a new game?</Text>
+            <Text style={styles.modalBody}>The current match will be discarded and won&apos;t affect your rating.</Text>
+            <View style={{ height: spacing.lg }} />
+            <Button
+              label="Yes, new game"
+              testID="confirm-new-yes"
+              onPress={() => { setConfirmNew(false); newGame(); }}
+              fullWidth
+            />
+            <View style={{ height: spacing.sm }} />
+            <Button
+              label="Keep playing"
+              variant="secondary"
+              testID="confirm-new-no"
+              onPress={() => setConfirmNew(false)}
+              fullWidth
+            />
           </View>
         </View>
       </Modal>
