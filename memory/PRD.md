@@ -1,5 +1,14 @@
 # RuleForge Chess — Product Requirements Document (MVP)
 
+## MVP Scope (Iteration 2 update)
+### Gameplay upgrades (v2)
+- **Proper ELO**: K=32; opponent rating per AI level (L1=600, L2=900, L3=1200, L4=1500); new users start at 800.
+- **Rating history**: persisted per match in `rating_history`; exposed via `GET /api/rating/history`; rendered on profile as a trend strip.
+- **Interactive Guided Scenarios**: replaces quiz — 3 scenarios per rule (king_dash, power_pawns, swap_move) with live chessboard validation, hint, retry, and "Next scenario" flow.
+- **Board UX**: no blocking overlay during AI thinking (inline spinner in opponent strip); move history auto-scroll with current-move highlight; sound on move/capture/check/end via WebAudio on web.
+- **Controls**: Undo only allowed between AI's reply and the player's next move; Abort only before first move (with confirmation); New-game always requires confirmation.
+- **Game-over**: modal shows ELO delta with colored +/- alongside XP and coin rewards.
+
 ## Vision
 A modern, premium chess app where every match feels familiar but every mode adds a fun twist. We combine timeless chess strategy with newly invented rule variants that are easy to learn and quick to play.
 
