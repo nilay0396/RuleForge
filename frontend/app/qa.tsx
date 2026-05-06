@@ -15,6 +15,7 @@ export default function QAScreen() {
   const { user } = useAuth();
   const [dash, setDash] = useState<any>(null);
   const [bugs, setBugs] = useState<any[]>([]);
+  const [uat, setUat] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
@@ -25,9 +26,14 @@ export default function QAScreen() {
   const load = useCallback(async () => {
     if (user?.role !== 'admin') return;
     try {
-      const [d, b] = await Promise.all([api.qaDashboard(), api.qaBugs()]);
+      const [d, b, u] = await Promise.all([
+        api.qaDashboard(),
+        api.qaBugs(),
+        api.qaUatStatus().catch(() => null),
+      ]);
       setDash(d);
       setBugs(b.bugs || []);
+      setUat(u);
     } catch {}
     setLoading(false);
   }, [user]);
@@ -104,6 +110,89 @@ export default function QAScreen() {
                 <Text style={styles.blockerText}>No blockers detected.</Text>
               )}
             </View>
+
+            {uat?.uat?.exists ? (
+              <View
+                style={[
+                  styles.bigCard,
+                  uat.ready && uat.uat.failed === 0 ? { borderColor: colors.success } : { borderColor: colors.danger },
+                ]}
+                testID="qa-uat-card"
+              >
+                <View style={styles.uatHead}>
+                  <Text style={styles.bigEyebrow}>MANUAL UAT SIGNOFF</Text>
+                  <View style={[styles.versionPill, uat.ready ? styles.versionPillReady : styles.versionPillNotReady]}>
+                    <Text style={[styles.versionPillText, uat.ready ? { color: '#0A0A0B' } : { color: '#fff' }]}>
+                      {uat.version}{uat.ready ? ' · READY' : ' · CHECK'}
+                    </Text>
+                  </View>
+                </View>
+                <Text style={styles.bigTitle}>
+                  {uat.uat.passed}/{uat.uat.total} passed · {uat.uat.pass_rate}%
+                </Text>
+                {uat.uat.run_date ? (
+                  <Text style={styles.blockerText}>Run date: {uat.uat.run_date} · Build: {uat.uat.build || '—'}</Text>
+                ) : null}
+                <View style={styles.uatStatsRow}>
+                  <UatStat label="TOTAL" value={uat.uat.total} />
+                  <UatStat label="PASSED" value={uat.uat.passed} accent={colors.success} />
+                  <UatStat label="FAILED" value={uat.uat.failed} accent={uat.uat.failed ? colors.danger : colors.textMuted} />
+                  <UatStat label="BLOCKED" value={uat.uat.blocked} accent={uat.uat.blocked ? colors.info : colors.textMuted} />
+                </View>
+                <View style={styles.progressTrack}>
+                  <View
+                    style={[
+                      styles.progressFillPass,
+                      { flex: uat.uat.passed || 0.0001 },
+                    ]}
+                  />
+                  <View
+                    style={[
+                      styles.progressFillBlocked,
+                      { flex: uat.uat.blocked || 0 },
+                    ]}
+                  />
+                  <View
+                    style={[
+                      styles.progressFillFail,
+                      { flex: uat.uat.failed || 0 },
+                    ]}
+                  />
+                </View>
+                <Text style={styles.uatLegend}>
+                  ✅ Auto {uat.uat.auto_pass} · 🟦 Manual {uat.uat.manual_pass} · 🟨 Signoff {uat.uat.blocked} · ❌ Fail {uat.uat.failed}
+                </Text>
+
+                {uat.uat.sections?.length ? (
+                  <View style={{ marginTop: spacing.md }}>
+                    <Text style={styles.uatSectionsHeader}>Section breakdown</Text>
+                    {uat.uat.sections.map((s: any) => {
+                      const ok = s.failed === 0 && s.blocked === 0;
+                      const partial = s.failed === 0 && s.blocked > 0;
+                      return (
+                        <View key={s.name} style={styles.uatSectionRow}>
+                          <Text style={styles.uatSectionName} numberOfLines={1}>{s.name}</Text>
+                          <Text
+                            style={[
+                              styles.uatSectionCount,
+                              ok ? { color: colors.success } : partial ? { color: colors.info } : { color: colors.danger },
+                            ]}
+                          >
+                            {s.passed}/{s.total}
+                            {s.blocked ? `  ·  ${s.blocked} signoff` : ''}
+                            {s.failed ? `  ·  ${s.failed} fail` : ''}
+                          </Text>
+                        </View>
+                      );
+                    })}
+                  </View>
+                ) : null}
+
+                {uat.uat.verdict ? (
+                  <Text style={styles.uatVerdict}>“{uat.uat.verdict}”</Text>
+                ) : null}
+              </View>
+            ) : null}
 
             <View style={styles.statsRow}>
               <Stat label="OPEN BUGS" value={dash.open_bugs} accent={dash.open_bugs ? colors.danger : colors.success} />
@@ -228,6 +317,15 @@ function Stat({ label, value, accent }: { label: string; value: number; accent?:
   );
 }
 
+function UatStat({ label, value, accent }: { label: string; value: number; accent?: string }) {
+  return (
+    <View style={styles.uatStat}>
+      <Text style={[styles.uatStatValue, accent ? { color: accent } : null]}>{value}</Text>
+      <Text style={styles.uatStatLabel}>{label}</Text>
+    </View>
+  );
+}
+
 function severityStyle(sev: string) {
   if (sev === 'blocker') return { borderColor: colors.danger, backgroundColor: 'rgba(239,68,68,0.06)' } as const;
   if (sev === 'critical') return { borderColor: colors.info, backgroundColor: 'rgba(6,182,212,0.06)' } as const;
@@ -281,4 +379,24 @@ const styles = StyleSheet.create({
   gateBox: { padding: spacing.xl, alignItems: 'center', justifyContent: 'center', flex: 1, gap: 8 },
   gateTitle: { color: colors.textPrimary, fontSize: 22, fontWeight: '900' },
   gateSub: { color: colors.textSecondary, textAlign: 'center', marginBottom: spacing.lg },
+  // Manual UAT Signoff card
+  uatHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  versionPill: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: radii.pill, borderWidth: 1 },
+  versionPillReady: { backgroundColor: colors.accent, borderColor: colors.accent },
+  versionPillNotReady: { backgroundColor: colors.danger, borderColor: colors.danger },
+  versionPillText: { fontSize: 10, fontWeight: '900', letterSpacing: 2 },
+  uatStatsRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
+  uatStat: { flex: 1, paddingVertical: 10, paddingHorizontal: 6, borderRadius: radii.md, backgroundColor: colors.elevated, borderColor: colors.border, borderWidth: 1, alignItems: 'center' },
+  uatStatValue: { color: colors.textPrimary, fontSize: 18, fontWeight: '900' },
+  uatStatLabel: { color: colors.textMuted, fontSize: 9, fontWeight: '900', letterSpacing: 1.5, marginTop: 2 },
+  progressTrack: { flexDirection: 'row', height: 8, borderRadius: 4, overflow: 'hidden', marginTop: spacing.md, backgroundColor: colors.elevated },
+  progressFillPass: { backgroundColor: colors.success },
+  progressFillBlocked: { backgroundColor: colors.info },
+  progressFillFail: { backgroundColor: colors.danger },
+  uatLegend: { color: colors.textSecondary, fontSize: 11, marginTop: 6 },
+  uatSectionsHeader: { color: colors.textPrimary, fontSize: 11, fontWeight: '900', letterSpacing: 2, marginBottom: 4 },
+  uatSectionRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 4, borderBottomColor: colors.border, borderBottomWidth: 1 },
+  uatSectionName: { color: colors.textSecondary, fontSize: 12, flex: 1, paddingRight: 8 },
+  uatSectionCount: { fontSize: 11, fontWeight: '900', letterSpacing: 1 },
+  uatVerdict: { color: colors.textMuted, fontSize: 12, marginTop: spacing.md, fontStyle: 'italic' },
 });

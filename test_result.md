@@ -478,12 +478,7 @@ metadata:
 
 test_plan:
   current_focus:
-    - "Tournaments CRUD (/tournaments, join/leave, leaderboard, report-match)"
-    - "Global leaderboard (/leaderboard/global) with country scope"
-    - "Featured players & live games (/featured-players, /live/games)"
-    - "Badges (/badges, /badges/me) + auto-award hooks"
-    - "Country profile (/profile/country) + match share (/matches/{id}/share)"
-    - "Spectator websocket /api/live/spectate/{game_id}"
+    - "Manual UAT signoff card on QA dashboard (GET /api/qa/uat-status)"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -715,3 +710,34 @@ agent_communication:
 
         Apart from these two validation/wiring bugs, the entire viral surface
         (tournaments, leaderboards, badges, share, featured) is functioning correctly.
+    - agent: "main"
+      message: |
+        Manual UAT integration into QA dashboard COMPLETE (final pre-launch wrap-up).
+
+        Backend changes (/app/backend/qa.py):
+          - Added _parse_uat_results() helper that parses /app/docs/UAT_RESULTS.md
+            tables into pass/fail/blocked counts per section + totals.
+          - Added _read_version() helper that reads /app/VERSION.
+          - New endpoint: GET /api/qa/uat-status (admin-only) returning
+            { version, ready, uat:{ total, passed, auto_pass, manual_pass,
+            failed, blocked, pass_rate, sections[], verdict, build, run_date } }
+          - GET /api/qa/dashboard now also embeds `uat` and `version` so the
+            existing dashboard payload is self-contained.
+
+        Frontend changes:
+          - /app/frontend/src/api.ts → added api.qaUatStatus()
+          - /app/frontend/app/qa.tsx → new "MANUAL UAT SIGNOFF" card under the
+            release-readiness card. Renders v1.0.0 readiness pill, total/passed/
+            failed/blocked tiles, multi-color progress bar, auto/manual/signoff/
+            fail legend, full 14-section breakdown, and the verdict quote.
+
+        Smoke test results (admin@ruleforge.app):
+          - GET /api/qa/uat-status → 200, version=v1.0.0, ready=true,
+            total=56 / passed=51 / failed=0 / blocked=5 / pass_rate=91.1%
+          - GET /api/qa/dashboard now also includes `uat` and `version`.
+          - VERSION = v1.0.0 verified.
+          - CHANGELOG.md v1.0.0 entry verified.
+
+        Verified visually via screenshot tool at 390x844 (iPhone 12). Card
+        renders cleanly within the existing dark/yellow theme; the v1.0.0
+        readiness badge is a yellow pill with "v1.0.0 · READY".

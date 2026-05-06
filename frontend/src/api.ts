@@ -272,4 +272,23 @@ export const api = {
     request<{ bug: any }>('/qa/bugs', { method: 'POST', body: JSON.stringify(body) }),
   qaUpdateBug: (id: string, patch: Record<string, any>) =>
     request<{ bug: any }>(`/qa/bugs/${id}`, { method: 'PUT', body: JSON.stringify(patch) }),
+  qaUatStatus: () =>
+    request<{
+      version: string;
+      ready: boolean;
+      uat: {
+        exists: boolean;
+        build: string | null;
+        run_date: string | null;
+        total: number;
+        passed: number;
+        auto_pass: number;
+        manual_pass: number;
+        failed: number;
+        blocked: number;
+        pass_rate: number;
+        sections: { name: string; total: number; passed: number; failed: number; blocked: number }[];
+        verdict: string | null;
+      };
+    }>('/qa/uat-status'),
 };
