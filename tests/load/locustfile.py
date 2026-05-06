@@ -9,10 +9,9 @@ Scenarios cover the targets in PRD:
   -   100 users joining tournament leaderboard
   -   500 users polling live leaderboards
 """
-import os
 import random
 import uuid
-from locust import HttpUser, task, between, events
+from locust import HttpUser, task, between
 
 BASE = '/api'
 DEFAULT_PASSWORD = 'QaTest@1234'

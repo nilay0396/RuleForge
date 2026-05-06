@@ -1,0 +1,173 @@
+name: e2e-tests
+
+on:
+  push:
+    branches: [main, master, develop]
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - 'tests/e2e/**'
+      - 'scripts/**'
+      - '.github/workflows/e2e-tests.yml'
+  pull_request:
+    branches: [main, master, develop]
+  workflow_dispatch:
+    inputs:
+      project:
+        description: 'Playwright project (iphone-12, galaxy-s21, ipad-mini, chrome-desktop)'
+        required: false
+        default: 'iphone-12'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  playwright:
+    name: Playwright E2E (${{ github.event.inputs.project || 'iphone-12' }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    services:
+      mongo:
+        image: mongo:6
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ping:1})' || mongo --quiet --eval 'db.runCommand({ping:1})'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      MONGO_URL: mongodb://localhost:27017
+      DB_NAME: ruleforge_ci_e2e
+      JWT_SECRET: ci-secret-do-not-use-in-prod
+      ADMIN_EMAIL: admin@ruleforge.app
+      ADMIN_PASSWORD: Admin@1234
+      FRONTEND_URL: http://localhost:3000
+      BCRYPT_ROUNDS: '4'
+      BCRYPT_THREAD_POOL_SIZE: '8'
+      EXPO_PUBLIC_BACKEND_URL: http://localhost:8001
+      EXPO_PACKAGER_HOSTNAME: localhost
+      EXPO_PACKAGER_PROXY_URL: http://localhost:3000
+      EXPO_TUNNEL_SUBDOMAIN: ruleforge-ci
+      E2E_BASE_URL: http://localhost:3000
+      CI: 'true'
+      PYTHONUNBUFFERED: '1'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'yarn'
+          cache-dependency-path: |
+            frontend/yarn.lock
+            tests/e2e/yarn.lock
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: yarn install --frozen-lockfile --network-timeout 600000
+
+      - name: Install Playwright (npm + browsers)
+        working-directory: tests/e2e
+        run: |
+          if [ -f yarn.lock ]; then yarn install --frozen-lockfile; else npm ci || npm install; fi
+          npx playwright install --with-deps chromium
+
+      - name: Wait for MongoDB
+        run: |
+          for i in {1..30}; do
+            if nc -z localhost 27017; then echo "mongo up"; exit 0; fi
+            sleep 1
+          done
+          echo "mongo did not start"; exit 1
+
+      - name: Seed test users
+        run: python scripts/seed_test_users.py
+
+      - name: Start FastAPI backend
+        working-directory: backend
+        run: |
+          nohup python -m uvicorn server:app --host 0.0.0.0 --port 8001 > /tmp/backend.log 2>&1 &
+          echo $! > /tmp/backend.pid
+          for i in {1..60}; do
+            if curl -fsS http://localhost:8001/api/rules > /dev/null; then echo "backend up"; exit 0; fi
+            sleep 1
+          done
+          echo "backend did not start"; tail -200 /tmp/backend.log; exit 1
+
+      - name: Build & serve Expo web
+        working-directory: frontend
+        run: |
+          npx expo export --platform web --output-dir dist
+          nohup npx serve -s dist -l 3000 > /tmp/web.log 2>&1 &
+          echo $! > /tmp/web.pid
+          for i in {1..60}; do
+            if curl -fsS http://localhost:3000 > /dev/null; then echo "web up"; exit 0; fi
+            sleep 1
+          done
+          echo "web did not start"; tail -200 /tmp/web.log; exit 1
+
+      - name: Run Playwright E2E
+        working-directory: tests/e2e
+        env:
+          PLAYWRIGHT_PROJECT: ${{ github.event.inputs.project || 'iphone-12' }}
+        run: npx playwright test --project="$PLAYWRIGHT_PROJECT"
+
+      - name: Generate QA status JSON
+        if: always()
+        run: python scripts/build_qa_status.py || true
+
+      - name: Upload Playwright HTML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-html-report
+          path: test_reports/e2e-html
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Upload Playwright traces (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: tests/e2e/test-results
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Upload backend & web logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-server-logs
+          path: |
+            /tmp/backend.log
+            /tmp/web.log
+          if-no-files-found: ignore
+
+      - name: Tear down servers
+        if: always()
+        run: |
+          kill $(cat /tmp/backend.pid) 2>/dev/null || true
+          kill $(cat /tmp/web.pid) 2>/dev/null || true

@@ -1,7 +1,5 @@
 """Iteration 2 tests: ELO, rating history, scenarios."""
-import math
 import uuid
-import requests
 
 from conftest import BASE_URL, auth_headers
 

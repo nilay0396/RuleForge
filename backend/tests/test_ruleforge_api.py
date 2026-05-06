@@ -5,7 +5,6 @@ move validation and admin endpoints (including 403 guard).
 """
 import uuid
 import requests
-import pytest
 
 from conftest import BASE_URL, auth_headers
 

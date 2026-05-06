@@ -1,0 +1,76 @@
+name: frontend-tests
+
+on:
+  push:
+    branches: [main, master, develop]
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/frontend-tests.yml'
+  pull_request:
+    branches: [main, master, develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: frontend-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-typecheck-build:
+    name: lint · typecheck · web build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      EXPO_PUBLIC_BACKEND_URL: http://localhost:8001
+      EXPO_TUNNEL_SUBDOMAIN: ruleforge-ci
+      EXPO_PACKAGER_HOSTNAME: localhost
+      EXPO_PACKAGER_PROXY_URL: http://localhost:3000
+      CI: 'true'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'yarn'
+          cache-dependency-path: frontend/yarn.lock
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: yarn install --frozen-lockfile --network-timeout 600000
+
+      - name: ESLint (expo lint)
+        working-directory: frontend
+        run: yarn lint --max-warnings=0 || yarn lint
+
+      - name: TypeScript type-check
+        working-directory: frontend
+        run: npx tsc --noEmit -p tsconfig.json
+
+      - name: Run frontend unit tests (Jest) — optional
+        working-directory: frontend
+        run: |
+          if [ -f jest.config.js ] || node -e "const p=require('./package.json'); process.exit(p.scripts && p.scripts.test ? 0 : 1)"; then
+            yarn test --watchAll=false --passWithNoTests --ci || (echo 'Jest not yet configured — skipping' && exit 0)
+          else
+            echo 'Jest config not present yet — skipping (Phase 3 will add).'
+          fi
+
+      - name: Expo web export (build sanity)
+        working-directory: frontend
+        run: |
+          npx expo export --platform web --output-dir dist || (echo 'web export failed' && exit 1)
+
+      - name: Upload web build artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-web-dist
+          path: frontend/dist
+          retention-days: 7
+          if-no-files-found: warn

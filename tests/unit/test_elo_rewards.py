@@ -1,6 +1,4 @@
 """Unit-style coverage of Elo + reward maths via API integration."""
-import pytest
-import httpx
 
 
 async def test_daily_reward_first_claim(client, fresh_user):

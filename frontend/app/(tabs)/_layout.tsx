@@ -44,25 +44,25 @@ export default function TabsLayout() {
         name="home"
         options={{
           title: 'PLAY',
-          tabBarIcon: ({ color }) => <TabIcon glyph="♛" color={color} />,
+          tabBarIcon: ({ color }: { color: string }) => <TabIcon glyph="♛" color={color} />,
           tabBarTestID: 'tab-home',
-        }}
+        } as any}
       />
       <Tabs.Screen
         name="watch"
         options={{
           title: 'WATCH',
-          tabBarIcon: ({ color }) => <TabIcon glyph="◎" color={color} />,
+          tabBarIcon: ({ color }: { color: string }) => <TabIcon glyph="◎" color={color} />,
           tabBarTestID: 'tab-watch',
-        }}
+        } as any}
       />
       <Tabs.Screen
         name="tournaments"
         options={{
           title: 'TOURNEY',
-          tabBarIcon: ({ color }) => <TabIcon glyph="⚔" color={color} />,
+          tabBarIcon: ({ color }: { color: string }) => <TabIcon glyph="⚔" color={color} />,
           tabBarTestID: 'tab-tournaments',
-        }}
+        } as any}
       />
       <Tabs.Screen
         name="daily"
@@ -74,17 +74,17 @@ export default function TabsLayout() {
         name="store"
         options={{
           title: 'STORE',
-          tabBarIcon: ({ color }) => <TabIcon glyph="✧" color={color} />,
+          tabBarIcon: ({ color }: { color: string }) => <TabIcon glyph="✧" color={color} />,
           tabBarTestID: 'tab-store',
-        }}
+        } as any}
       />
       <Tabs.Screen
         name="profile"
         options={{
           title: 'PROFILE',
-          tabBarIcon: ({ color }) => <TabIcon glyph="◉" color={color} />,
+          tabBarIcon: ({ color }: { color: string }) => <TabIcon glyph="◉" color={color} />,
           tabBarTestID: 'tab-profile',
-        }}
+        } as any}
       />
     </Tabs>
   );

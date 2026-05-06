@@ -14,14 +14,13 @@ load_dotenv(ROOT_DIR / ".env")
 import os
 import logging
 import uuid
-import secrets
 from datetime import datetime, timezone, timedelta, date
 from typing import Any, Dict, List, Optional
 
 import bcrypt
 import chess as pychess
 import jwt
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, status
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, EmailStr, Field
@@ -1062,7 +1061,6 @@ from realtime import ws_router  # noqa: E402
 from social import make_social_router  # noqa: E402
 from retention import (  # noqa: E402
     make_retention_router,
-    seed_puzzles as _seed_puzzles,
     _public_user as retention_public_user,
 )
 

@@ -1,4 +1,3 @@
-import pytest
 
 
 async def test_daily_puzzle_no_solution_field(client, fresh_user):

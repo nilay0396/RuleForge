@@ -1,4 +1,3 @@
-import pytest
 
 
 async def test_qa_dashboard_basic(client, admin_user):

@@ -1,13 +1,12 @@
 """Social layer: friends, challenges, notifications, user search."""
 from __future__ import annotations
 
-import os
 import uuid
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from realtime import connection_manager, games, persist_game_record, notify_user, is_online
 

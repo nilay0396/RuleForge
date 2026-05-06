@@ -4,12 +4,11 @@ Mounted under /api by server.py via include_router.
 """
 from __future__ import annotations
 
-import os
 import uuid
 import random
 import math
 from datetime import datetime, date, timezone, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 import chess as pychess
 from fastapi import APIRouter, Depends, HTTPException, Request

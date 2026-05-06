@@ -11,8 +11,8 @@ import json
 import logging
 import os
 import uuid
-from datetime import datetime, timezone, timedelta
-from typing import Any, Dict, List, Optional, Set, Tuple
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Set
 
 import chess as pychess
 import jwt

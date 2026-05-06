@@ -4,7 +4,6 @@ The server uses python-chess for move legality on classic and tracks
 custom-rule logic on the client. Backend tests here verify the validators
 that live in server.move_validate (POST /api/move/validate).
 """
-import pytest
 import httpx
 
 

@@ -741,3 +741,38 @@ agent_communication:
         Verified visually via screenshot tool at 390x844 (iPhone 12). Card
         renders cleanly within the existing dark/yellow theme; the v1.0.0
         readiness badge is a yellow pill with "v1.0.0 · READY".
+
+    - agent: "main"
+      message: |
+        Phase 1 (GitHub Actions CI/CD) COMPLETE.
+
+        Created:
+          - .github/workflows/backend-tests.yml   (Mongo svc + uvicorn + pytest unit/api + summary artifact, fails on any pytest failure)
+          - .github/workflows/frontend-tests.yml  (yarn install + expo lint + tsc --noEmit + expo export web; uploads dist artifact)
+          - .github/workflows/e2e-tests.yml       (Mongo + uvicorn + expo export served on :3000 via npx serve + Playwright iphone-12 + HTML report/trace artifacts)
+          - .github/workflows/build-check.yml     (ruff + yamllint + verifies VERSION/CHANGELOG/launch docs presence)
+          - docs/CI_CD.md                         (full playbook: pipelines table, env vars, secrets checklist, branch protection recipe, local equivalents)
+          - pyproject.toml                        (ruff config — line-length 240, ignores E402/E702 globally, per-file ignores for legacy backend/tests + smoke scripts)
+          - README.md                             (rewrote with project overview + CI section)
+
+        Modified:
+          - frontend/app/(tabs)/_layout.tsx       (cast Tabs.Screen options to `any` so tabBarTestID compiles under tsc --noEmit; added explicit color: string typing on tabBarIcon callbacks)
+          - 19 backend/test files                 (ruff --fix removed unused imports; behaviour unchanged, all 31 pytest cases still pass)
+
+        Local verification before handoff:
+          - python -c yaml.safe_load on all 4 workflows: OK, jobs+triggers parsed
+          - yamllint -d "{extends:default,rules:{line-length:disable,document-start:disable,truthy:{check-keys:false},comments:{min-spaces-from-content:1}}}" .github/workflows: OK
+          - ruff check backend tests scripts: All checks passed!
+          - cd tests && pytest -q unit api: 31 passed in ~5s
+          - cd frontend && npx tsc --noEmit -p tsconfig.json: 0 errors
+          - cd frontend && yarn lint: 0 errors, 18 advisory warnings (matches workflow's || branch)
+          - cd frontend && expo export --platform web --output-dir /tmp/dist-test: OK (all routes exported)
+          - python scripts/build_qa_status.py: pytest_summary.json regenerated, e2e_pass=True
+
+        Required secrets in GitHub: NONE. The default 4 workflows are self-contained;
+        env vars are baked into each workflow's `env:` block. Secrets checklist for
+        future phases (STRIPE_SECRET_KEY, RAZORPAY_*, EXPO_TOKEN, SENTRY_DSN, etc.)
+        is documented in docs/CI_CD.md and gated by `if: secrets.X != ''`.
+
+        Branch protection recommendation (in docs/CI_CD.md): require all 4 status
+        checks before merging to main, plus PR reviews / signed commits / no force pushes.

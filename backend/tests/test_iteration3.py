@@ -13,11 +13,9 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import time
 from urllib.parse import urlparse
 
-import pytest
 import requests
 import websockets
 

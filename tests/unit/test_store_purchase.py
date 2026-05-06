@@ -1,5 +1,4 @@
 """Unit-level tests for the store / wallet flow."""
-import pytest
 
 
 async def test_default_items_owned(client, fresh_user):

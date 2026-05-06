@@ -1,4 +1,3 @@
-import pytest
 
 
 async def test_global_leaderboard(client, player1):

@@ -3,10 +3,8 @@
 Lightweight: spins up an httpx.AsyncClient against the running FastAPI server
 (via supervisor) and creates fresh test users on demand.
 """
-import asyncio
 import os
 import uuid
-import pytest
 import pytest_asyncio
 import httpx
 from dotenv import load_dotenv

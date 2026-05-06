@@ -1,0 +1,35 @@
+[tool.ruff]
+# Repo-wide ruff configuration shared by local dev and CI (build-check.yml).
+# Keep this list small and intentional. Bigger codebase cleanups should land
+# in their own PRs.
+line-length = 240
+target-version = "py311"
+extend-exclude = [
+    "frontend/**",
+    "tests/e2e/**",
+    "test_reports/**",
+    "**/.venv/**",
+    "**/node_modules/**",
+]
+
+[tool.ruff.lint]
+# Default rule selection plus the unused-import check.
+select = ["E", "F", "W"]
+# Project-wide ignores:
+#   E402  load_dotenv() must run before app imports — intentional pattern in
+#         /app/backend/server.py and a few helper scripts.
+#   E702  legacy fixture files use ';' on a couple of lines.
+ignore = ["E402", "E702"]
+
+[tool.ruff.lint.per-file-ignores]
+# Legacy/manual integration tests that pre-date the current pytest tree.
+"backend/tests/**" = ["F841", "F401", "E501", "F811"]
+# The aggregated /qa/dashboard handler keeps a couple of named locals for
+# readability even when the optimiser finds them redundant.
+"backend/qa.py" = ["F841"]
+# Real-time websocket helpers similarly keep named return values for log
+# context that the linter can't see.
+"backend/realtime.py" = ["F841"]
+# Standalone smoke scripts at the repo root are kept for quick manual runs.
+"backend_test.py" = ["F401", "F841", "E501"]
+"viral_test.py" = ["F401", "F841", "E501"]
