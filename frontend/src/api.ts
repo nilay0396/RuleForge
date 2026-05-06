@@ -253,4 +253,23 @@ export const api = {
     request<{ share: { title: string; text: string; result: string; rating_after?: number; elo_delta?: number; rule_key?: string }; match_id: string }>(
       `/matches/${encodeURIComponent(id)}/share`,
     ),
+
+  // QA / release readiness (admin)
+  qaDashboard: () =>
+    request<{
+      total_bugs: number; open_bugs: number;
+      by_severity: { blocker: number; critical: number; major: number; minor: number };
+      tests: any; performance: any;
+      release_ready: boolean; blockers: string[];
+    }>('/qa/dashboard'),
+  qaBugs: (params?: { status?: string; severity?: string }) => {
+    const q = new URLSearchParams();
+    if (params?.status) q.set('status', params.status);
+    if (params?.severity) q.set('severity', params.severity);
+    return request<{ bugs: any[]; count: number }>(`/qa/bugs${q.toString() ? `?${q}` : ''}`);
+  },
+  qaCreateBug: (body: { title: string; severity: string; feature: string; steps?: string; expected?: string; actual?: string; assigned_to?: string; notes?: string }) =>
+    request<{ bug: any }>('/qa/bugs', { method: 'POST', body: JSON.stringify(body) }),
+  qaUpdateBug: (id: string, patch: Record<string, any>) =>
+    request<{ bug: any }>(`/qa/bugs/${id}`, { method: 'PUT', body: JSON.stringify(patch) }),
 };

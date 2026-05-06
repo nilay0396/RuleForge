@@ -476,9 +476,10 @@ def make_viral_router(current_user_dep, db_getter, push_notification_fn=None,
         user: Dict[str, Any] = Depends(current_user_dep),
     ):
         db = db_getter(request)
-        country = (body.get("country") or "").upper()[:2]
-        if not country.isalpha() or len(country) != 2:
+        raw = str(body.get("country") or "").strip()
+        if len(raw) != 2 or not raw.isalpha():
             raise HTTPException(400, "country must be a 2-letter ISO code")
+        country = raw.upper()
         await db.users.update_one({"id": user["id"]}, {"$set": {"country": country}})
         return {"ok": True, "country": country}
 
@@ -515,20 +516,26 @@ def make_viral_router(current_user_dep, db_getter, push_notification_fn=None,
         await websocket.accept()
         live_registry.add(game_id, websocket)
         try:
-            rooms_dict = get_realtime_rooms() if get_realtime_rooms else {}
-            room = rooms_dict.get(game_id)
-            if room:
+            gm = get_realtime_rooms() if get_realtime_rooms else None
+            # Access the synchronous games dict directly (GameManager.get is async)
+            game = getattr(gm, "games", {}).get(game_id) if gm else None
+            if game and getattr(game, "status", "ongoing") == "ongoing":
                 await websocket.send_json({
                     "type": "snapshot",
-                    "fen": room.get("fen"),
-                    "moves": room.get("moves") or [],
-                    "white": room.get("white_user"),
-                    "black": room.get("black_user"),
-                    "rule_key": room.get("rule_key", "classic"),
+                    "fen": game.board.fen(),
+                    "moves": list(game.moves_san),
+                    "white_id": game.players.get("w"),
+                    "black_id": game.players.get("b"),
+                    "rule_key": game.rule_key,
                 })
             else:
                 await websocket.send_json({"type": "error", "detail": "Game not active"})
-            # Receive loop just to keep connection alive; no client→server messages used
+                try:
+                    await websocket.close()
+                except Exception:
+                    pass
+                return
+            # Receive loop just to keep connection alive; respond to ping/pong
             while True:
                 msg = await websocket.receive_text()
                 if msg == "ping":

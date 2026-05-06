@@ -1044,5 +1044,10 @@ viral_router = make_viral_router(
 )
 app.include_router(viral_router, prefix="/api")
 
+# QA / bug tracker / release readiness dashboard (admin-only)
+from qa import make_qa_router  # noqa: E402
+qa_router = make_qa_router(current_user, _db_getter)
+app.include_router(qa_router, prefix="/api")
+
 # Override the existing public_user to use the richer retention version
 public_user = retention_public_user  # noqa: F811

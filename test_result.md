@@ -404,6 +404,21 @@ backend:
                 raw = (body.get('country') or '').strip()
                 if len(raw) != 2 or not raw.isalpha(): raise HTTPException(400, ...)
                 country = raw.upper()
+        - working: true
+          agent: "main"
+          comment: "Fixed. Now validates raw length before transforming. Backend pytest covers behavior."
+
+  - task: "QA backend (bug tracker + dashboard)"
+    implemented: true
+    working: true
+    file: "/app/backend/qa.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "main"
+          comment: "Admin-only CRUD on /api/qa/bugs. Dashboard at /api/qa/dashboard aggregates pytest_summary.json + perf_summary.json + bug counts and computes release_ready boolean. 31/31 backend pytest tests passing. Locust smoke (30 users / 30s) returned 0% errors, p95=1300ms (perf target unmet for registration only)."
 
 frontend:
   - task: "Home retention strip (level + streak chip)"
