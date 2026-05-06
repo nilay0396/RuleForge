@@ -4,7 +4,15 @@
   "errors": 0,
   "skipped": 0,
   "returncode": 0,
-  "tail": "...............................                                          [100%]\n31 passed in 9.29s\n",
-  "generated_at": "2026-05-06T07:48:59.408504+00:00",
-  "e2e_pass": null
+  "tail": "...............................                                          [100%]\n31 passed in 8.87s\n",
+  "generated_at": "2026-05-06T09:37:32.184360+00:00",
+  "e2e": {
+    "expected": 22,
+    "unexpected": 0,
+    "flaky": 0,
+    "skipped": 0,
+    "duration_ms": 261321.307,
+    "pass": true
+  },
+  "e2e_pass": true
 }

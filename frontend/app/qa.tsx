@@ -125,6 +125,18 @@ export default function QAScreen() {
             </View>
 
             <View style={styles.subCard}>
+              <Text style={styles.subTitle}>E2E (Playwright)</Text>
+              {dash.e2e?.note ? (
+                <Text style={styles.note}>{dash.e2e.note}</Text>
+              ) : (
+                <Text style={styles.subText}>
+                  {dash.e2e?.expected ?? 0} passed · {dash.e2e?.unexpected ?? 0} failed · {dash.e2e?.flaky ?? 0} flaky · {Math.round((dash.e2e?.duration_ms ?? 0) / 1000)}s
+                  {dash.e2e?.pass ? '  ·  ✅' : '  ·  ❌'}
+                </Text>
+              )}
+            </View>
+
+            <View style={styles.subCard}>
               <Text style={styles.subTitle}>Performance smoke</Text>
               {dash.performance?.note ? (
                 <Text style={styles.note}>{dash.performance.note}</Text>

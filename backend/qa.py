@@ -219,6 +219,7 @@ def make_qa_router(current_user_dep, db_getter):
                 'minor': open_minor,
             },
             'tests': test_report or {'passed': 0, 'failed': 0, 'note': 'Run `make test-backend` to populate.'},
+            'e2e': (test_report or {}).get('e2e') or {'note': 'Run `make test-e2e` to populate.'},
             'performance': perf_report or {'note': 'Run `make perf` to populate.'},
             'release_ready': release_ready,
             'blockers': reasons,

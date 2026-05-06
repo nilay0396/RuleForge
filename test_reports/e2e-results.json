@@ -1,0 +1,1068 @@
+{
+  "config": {
+    "configFile": "/app/tests/e2e/playwright.config.ts",
+    "rootDir": "/app/tests/e2e/specs",
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "/app/tests/e2e/test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "iphone-12",
+        "name": "iphone-12",
+        "testDir": "/app/tests/e2e/specs",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 60000
+      },
+      {
+        "outputDir": "/app/tests/e2e/test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "galaxy-s21",
+        "name": "galaxy-s21",
+        "testDir": "/app/tests/e2e/specs",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 60000
+      },
+      {
+        "outputDir": "/app/tests/e2e/test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "ipad-mini",
+        "name": "ipad-mini",
+        "testDir": "/app/tests/e2e/specs",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 60000
+      },
+      {
+        "outputDir": "/app/tests/e2e/test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "chrome-desktop",
+        "name": "chrome-desktop",
+        "testDir": "/app/tests/e2e/specs",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 60000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "list",
+        null
+      ],
+      [
+        "html",
+        {
+          "outputFolder": "/app/test_reports/e2e-html",
+          "open": "never"
+        }
+      ],
+      [
+        "json",
+        {
+          "outputFile": "/app/test_reports/e2e-results.json"
+        }
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.59.1",
+    "workers": 1,
+    "webServer": null
+  },
+  "suites": [
+    {
+      "title": "01-auth.spec.ts",
+      "file": "01-auth.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "Flow 1 — New user signup & onboarding",
+          "file": "01-auth.spec.ts",
+          "line": 4,
+          "column": 6,
+          "specs": [
+            {
+              "title": "register → land on home with stats",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "iphone-12",
+                  "projectName": "iphone-12",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 9459,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-05-06T09:32:47.100Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "791b3c4e0869e77b2651-089362c8efe1e09ce136",
+              "file": "01-auth.spec.ts",
+              "line": 5,
+              "column": 7
+            }
+          ]
+        },
+        {
+          "title": "Flow 2 — Existing user login",
+          "file": "01-auth.spec.ts",
+          "line": 17,
+          "column": 6,
+          "specs": [
+            {
+              "title": "login known seeded user",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "iphone-12",
+                  "projectName": "iphone-12",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 4137,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-05-06T09:32:56.731Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "791b3c4e0869e77b2651-73f924c295089d0bdc79",
+              "file": "01-auth.spec.ts",
+              "line": 18,
+              "column": 7
+            },
+            {
+              "title": "login fails on wrong password",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "iphone-12",
+                  "projectName": "iphone-12",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 3740,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-05-06T09:33:00.875Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "791b3c4e0869e77b2651-6047b09e90a1765907e7",
+              "file": "01-auth.spec.ts",
+              "line": 26,
+              "column": 7
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "02-puzzles.spec.ts",
+      "file": "02-puzzles.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "Flow 4 — Daily puzzle completion",
+          "file": "02-puzzles.spec.ts",
+          "line": 4,
+          "column": 6,
+          "specs": [
+            {
+              "title": "open daily puzzle and verify renders",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "iphone-12",
+                  "projectName": "iphone-12",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 6290,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-05-06T09:33:04.625Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "3b302e10f7ba4c757522-1914ab98d10d9d250c2b",
+              "file": "02-puzzles.spec.ts",
+              "line": 5,
+              "column": 7
+            }
+          ]
+        },
+        {
+          "title": "Flow 4b — Random puzzle from home tile",
+          "file": "02-puzzles.spec.ts",
+          "line": 18,
+          "column": 6,
+          "specs": [
+            {
+              "title": "random puzzle navigation",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "iphone-12",
+                  "projectName": "iphone-12",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 6306,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-05-06T09:33:10.922Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "3b302e10f7ba4c757522-cbe6a42af9fa2aabe9a8",
+              "file": "02-puzzles.spec.ts",
+              "line": 19,
+              "column": 7
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "03-store.spec.ts",
+      "file": "03-store.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "Flow 7 — Store purchase & inventory",
+          "file": "03-store.spec.ts",
+          "line": 4,
+          "column": 6,
+          "specs": [
+            {
+              "title": "store tab renders item grid",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "iphone-12",
+                  "projectName": "iphone-12",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 7319,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-05-06T09:33:17.237Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "b13ee6de143f410e97d5-83a89476b4c6d1a335fb",
+              "file": "03-store.spec.ts",
+              "line": 11,
+              "column": 7
+            },
+            {
+              "title": "preview a board theme and surface buy CTA",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "iphone-12",
+                  "projectName": "iphone-12",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 8265,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-05-06T09:33:24.563Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "b13ee6de143f410e97d5-dc126b41431d9d47c27e",
+              "file": "03-store.spec.ts",
+              "line": 22,
+              "column": 7
+            },
+            {
+              "title": "rewarded ad card visible and bounded by daily limit",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "iphone-12",
+                  "projectName": "iphone-12",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 7356,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-05-06T09:33:32.837Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "b13ee6de143f410e97d5-106f3f4ed3f8f69f6bb8",
+              "file": "03-store.spec.ts",
+              "line": 33,
+              "column": 7
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "04-tournaments.spec.ts",
+      "file": "04-tournaments.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "Flow 8 — Tournament discovery & detail",
+          "file": "04-tournaments.spec.ts",
+          "line": 4,
+          "column": 6,
+          "specs": [
+            {
+              "title": "tournaments tab lists at least 1 tournament",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "iphone-12",
+                  "projectName": "iphone-12",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 7049,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-05-06T09:33:40.203Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "2f2473511f41e09a7ebb-2fdde9a974323313a461",
+              "file": "04-tournaments.spec.ts",
+              "line": 11,
+              "column": 7
+            },
+            {
+              "title": "open tournament detail and join (best-effort)",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "iphone-12",
+                  "projectName": "iphone-12",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 9653,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-05-06T09:33:47.260Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "2f2473511f41e09a7ebb-c0259b024ca0bbd7c54b",
+              "file": "04-tournaments.spec.ts",
+              "line": 19,
+              "column": 7
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "05-watch.spec.ts",
+      "file": "05-watch.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "Flow 9 — Watch live & spectator (graceful when no live games)",
+          "file": "05-watch.spec.ts",
+          "line": 4,
+          "column": 6,
+          "specs": [
+            {
+              "title": "watch tab shows featured + leaderboard",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "iphone-12",
+                  "projectName": "iphone-12",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 7025,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-05-06T09:33:56.923Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "3a806edb9eb1785209e6-a28769d96dfe484053d0",
+              "file": "05-watch.spec.ts",
+              "line": 11,
+              "column": 7
+            },
+            {
+              "title": "spectator screen renders error gracefully for stale game id",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "iphone-12",
+                  "projectName": "iphone-12",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 7639,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-05-06T09:34:03.956Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "3a806edb9eb1785209e6-94984a12111cf9da1a12",
+              "file": "05-watch.spec.ts",
+              "line": 19,
+              "column": 7
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "06-admin-qa.spec.ts",
+      "file": "06-admin-qa.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "Flow 10 — Admin QA dashboard",
+          "file": "06-admin-qa.spec.ts",
+          "line": 4,
+          "column": 6,
+          "specs": [
+            {
+              "title": "admin can open QA dashboard and see metrics",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "iphone-12",
+                  "projectName": "iphone-12",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 23262,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-05-06T09:34:11.607Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "65ebb9be1d3c5725f7d0-4306d4bcdc50a06c5769",
+              "file": "06-admin-qa.spec.ts",
+              "line": 5,
+              "column": 7
+            },
+            {
+              "title": "admin can file a bug and see it appear",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "iphone-12",
+                  "projectName": "iphone-12",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 25527,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-05-06T09:34:34.878Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "65ebb9be1d3c5725f7d0-116d578972636173e2c2",
+              "file": "06-admin-qa.spec.ts",
+              "line": 19,
+              "column": 7
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "07-websocket.spec.ts",
+      "file": "07-websocket.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "WebSocket stability — spectator socket",
+          "file": "07-websocket.spec.ts",
+          "line": 4,
+          "column": 6,
+          "specs": [
+            {
+              "title": "spectate ws emits message for non-existent game (graceful close)",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "iphone-12",
+                  "projectName": "iphone-12",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 8581,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-05-06T09:35:00.419Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "95b06c01e03c7a9ee2d6-ae5921b5160e34ad2613",
+              "file": "07-websocket.spec.ts",
+              "line": 5,
+              "column": 7
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "08-responsive.spec.ts",
+      "file": "08-responsive.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "Mobile responsiveness — no horizontal overflow on key tabs",
+          "file": "08-responsive.spec.ts",
+          "line": 11,
+          "column": 6,
+          "specs": [
+            {
+              "title": "iPhone 12 portrait: home, store, watch, tournaments do not overflow",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "iphone-12",
+                  "projectName": "iphone-12",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 14537,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-05-06T09:35:09.010Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "5ec51265abdd607266d2-8b5fd734757841e3ad4e",
+              "file": "08-responsive.spec.ts",
+              "line": 13,
+              "column": 9
+            },
+            {
+              "title": "Galaxy S21 portrait: home, store, watch, tournaments do not overflow",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "iphone-12",
+                  "projectName": "iphone-12",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 14199,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-05-06T09:35:23.554Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "5ec51265abdd607266d2-9a189db62f904d843519",
+              "file": "08-responsive.spec.ts",
+              "line": 13,
+              "column": 9
+            },
+            {
+              "title": "iPad Mini portrait: home, store, watch, tournaments do not overflow",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "iphone-12",
+                  "projectName": "iphone-12",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 14335,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-05-06T09:35:37.759Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "5ec51265abdd607266d2-162477a76e533c5a9bd4",
+              "file": "08-responsive.spec.ts",
+              "line": 13,
+              "column": 9
+            },
+            {
+              "title": "Desktop 1280: home, store, watch, tournaments do not overflow",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "iphone-12",
+                  "projectName": "iphone-12",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 14375,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-05-06T09:35:52.100Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "5ec51265abdd607266d2-ad13cee03fd3bc56ae81",
+              "file": "08-responsive.spec.ts",
+              "line": 13,
+              "column": 9
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "09-multiplayer.spec.ts",
+      "file": "09-multiplayer.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "Flow 5 — Two-context smoke (multiplayer / friends)",
+          "file": "09-multiplayer.spec.ts",
+          "line": 4,
+          "column": 6,
+          "specs": [
+            {
+              "title": "two browsers can both reach the home screen as different users",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "iphone-12",
+                  "projectName": "iphone-12",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 40997,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-05-06T09:36:06.485Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "8b0c57bc84f97035b597-20b0cef2f8c1869dd823",
+              "file": "09-multiplayer.spec.ts",
+              "line": 5,
+              "column": 7
+            }
+          ]
+        },
+        {
+          "title": "Flow 6 — Multiplayer queue smoke (best-effort)",
+          "file": "09-multiplayer.spec.ts",
+          "line": 28,
+          "column": 6,
+          "specs": [
+            {
+              "title": "online tab loads without crash for both users",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "iphone-12",
+                  "projectName": "iphone-12",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 13392,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-05-06T09:36:47.488Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "8b0c57bc84f97035b597-63bc4008c02bb8d6231f",
+              "file": "09-multiplayer.spec.ts",
+              "line": 29,
+              "column": 7
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "10-lesson.spec.ts",
+      "file": "10-lesson.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "Flow 3 — Guided lesson smoke",
+          "file": "10-lesson.spec.ts",
+          "line": 4,
+          "column": 6,
+          "specs": [
+            {
+              "title": "rule lesson opens",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "iphone-12",
+                  "projectName": "iphone-12",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 7067,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-05-06T09:37:00.892Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "c60e27c52475caf4226f-fca42ac5dfae8cc44eca",
+              "file": "10-lesson.spec.ts",
+              "line": 5,
+              "column": 7
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-05-06T09:32:46.707Z",
+    "duration": 261321.307,
+    "expected": 22,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}

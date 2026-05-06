@@ -85,8 +85,8 @@ async def main():
     print(f'Seed complete — created {creates}, updated {upserts}.')
 
     # Friend pair
-    fa = await db.users.find_one({'email': 'friend_a@ruleforge.test'}, {'_id': 0, 'id': 1})
-    fb = await db.users.find_one({'email': 'friend_b@ruleforge.test'}, {'_id': 0, 'id': 1})
+    fa = await db.users.find_one({'email': 'friend_a@ruleforgeqa.app'}, {'_id': 0, 'id': 1})
+    fb = await db.users.find_one({'email': 'friend_b@ruleforgeqa.app'}, {'_id': 0, 'id': 1})
     if fa and fb:
         await db.friends.update_one(
             {'user_id': fa['id'], 'friend_id': fb['id']},

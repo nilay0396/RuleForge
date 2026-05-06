@@ -41,12 +41,37 @@ def run_pytest_summary():
     }
 
 
+def parse_e2e_report():
+    """Read Playwright JSON reporter output for E2E summary."""
+    path = '/app/test_reports/e2e-results.json'
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path) as f:
+            data = json.load(f)
+    except Exception:
+        return None
+    stats = data.get('stats', {})
+    expected = stats.get('expected', 0)
+    unexpected = stats.get('unexpected', 0)
+    return {
+        'expected': expected,
+        'unexpected': unexpected,
+        'flaky': stats.get('flaky', 0),
+        'skipped': stats.get('skipped', 0),
+        'duration_ms': stats.get('duration', 0),
+        'pass': unexpected == 0 and expected > 0,
+    }
+
+
 def main():
     summary = run_pytest_summary()
-    summary['e2e_pass'] = None  # populated by Playwright suite when wired
+    e2e = parse_e2e_report()
+    summary['e2e'] = e2e
+    summary['e2e_pass'] = (e2e or {}).get('pass') if e2e is not None else None
     with open(OUT, 'w') as f:
         json.dump(summary, f, indent=2)
-    print(f'Wrote {OUT}: {summary["passed"]} passed, {summary["failed"]} failed.')
+    print(f'Wrote {OUT}: {summary["passed"]} passed, {summary["failed"]} failed; E2E={summary["e2e_pass"]}.')
 
 
 if __name__ == '__main__':

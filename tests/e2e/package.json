@@ -1,0 +1,15 @@
+{
+  "name": "ruleforge-e2e",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "test:mobile": "playwright test --project=iphone-12",
+    "test:desktop": "playwright test --project=chrome-desktop",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.47.0"
+  }
+}
