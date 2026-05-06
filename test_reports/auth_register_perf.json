@@ -1,0 +1,14 @@
+{
+  "endpoint": "POST /auth/register",
+  "samples": 30,
+  "concurrency": 10,
+  "target_ms": 800.0,
+  "p50_ms": 296.5,
+  "p95_ms": 371.4,
+  "p99_ms": 449.4,
+  "mean_ms": 277.2,
+  "min_ms": 151.9,
+  "max_ms": 449.4,
+  "target_met": true,
+  "generated_at": "2026-05-06T10:21:15.016815+00:00"
+}

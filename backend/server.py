@@ -51,15 +51,51 @@ def jwt_secret() -> str:
 # -----------------------------------------------------------------------------
 # Helpers
 # -----------------------------------------------------------------------------
-def hash_password(password: str) -> str:
-    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+import asyncio
+
+# bcrypt hashing is CPU-bound (~55ms at rounds=10 / ~220ms at rounds=12) and
+# would block the FastAPI event loop if called synchronously. We offload to a
+# default thread pool so the server can keep handling other requests during
+# the hash. Rounds are tunable via BCRYPT_ROUNDS env (default 10, OWASP
+# production-safe minimum used by Django/passlib).
+BCRYPT_ROUNDS = int(os.environ.get("BCRYPT_ROUNDS", "10"))
+_THREAD_POOL_SIZE = int(os.environ.get("BCRYPT_THREAD_POOL_SIZE", "32"))
 
 
-def verify_password(plain: str, hashed: str) -> bool:
+def _ensure_thread_pool():
+    try:
+        loop = asyncio.get_event_loop()
+        loop.set_default_executor(__import__("concurrent.futures").futures.ThreadPoolExecutor(max_workers=_THREAD_POOL_SIZE))
+    except Exception:
+        pass
+
+
+def _hash_password_sync(password: str) -> str:
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt(rounds=BCRYPT_ROUNDS)).decode("utf-8")
+
+
+def _verify_password_sync(plain: str, hashed: str) -> bool:
     try:
         return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
     except Exception:
         return False
+
+
+async def hash_password_async(password: str) -> str:
+    return await asyncio.to_thread(_hash_password_sync, password)
+
+
+async def verify_password_async(plain: str, hashed: str) -> bool:
+    return await asyncio.to_thread(_verify_password_sync, plain, hashed)
+
+
+# Sync wrappers preserved for non-async callers (e.g. seeders).
+def hash_password(password: str) -> str:
+    return _hash_password_sync(password)
+
+
+def verify_password(plain: str, hashed: str) -> bool:
+    return _verify_password_sync(plain, hashed)
 
 
 def create_token(user_id: str, email: str, role: str) -> str:
@@ -218,14 +254,16 @@ async def admin_user(user: Dict[str, Any] = Depends(current_user)) -> Dict[str, 
 @api.post("/auth/register")
 async def register(payload: RegisterIn):
     email = payload.email.lower().strip()
-    existing = await db.users.find_one({"email": email})
+    existing = await db.users.find_one({"email": email}, {"_id": 1})
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
+    # Run bcrypt off the event loop so other requests aren't blocked.
+    password_hash = await hash_password_async(payload.password)
     user_id = str(uuid.uuid4())
     user_doc = {
         "id": user_id,
         "email": email,
-        "password_hash": hash_password(payload.password),
+        "password_hash": password_hash,
         "name": payload.name.strip(),
         "role": "user",
         "is_guest": False,
@@ -251,7 +289,10 @@ async def register(payload: RegisterIn):
 async def login(payload: LoginIn):
     email = payload.email.lower().strip()
     user = await db.users.find_one({"email": email}, {"_id": 0})
-    if not user or not user.get("password_hash") or not verify_password(payload.password, user["password_hash"]):
+    if not user or not user.get("password_hash"):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    ok = await verify_password_async(payload.password, user["password_hash"])
+    if not ok:
         raise HTTPException(status_code=401, detail="Invalid email or password")
     token = create_token(user["id"], email, user.get("role", "user"))
     return {"token": token, "user": public_user(user)}
@@ -292,13 +333,14 @@ async def upgrade_guest(payload: UpgradeIn, user: Dict[str, Any] = Depends(curre
     if not user.get("is_guest"):
         raise HTTPException(status_code=400, detail="Account is already a full account")
     email = payload.email.lower().strip()
-    if await db.users.find_one({"email": email}):
+    if await db.users.find_one({"email": email}, {"_id": 1}):
         raise HTTPException(status_code=400, detail="Email already registered")
+    password_hash = await hash_password_async(payload.password)
     await db.users.update_one(
         {"id": user["id"]},
         {"$set": {
             "email": email,
-            "password_hash": hash_password(payload.password),
+            "password_hash": password_hash,
             "name": payload.name.strip(),
             "is_guest": False,
         }},
@@ -960,6 +1002,7 @@ async def seed_quizzes():
 
 @app.on_event("startup")
 async def on_startup():
+    _ensure_thread_pool()
     try:
         # Cleanup legacy guest docs that had email explicitly set to null — they
         # collide with the unique index. We unset the field entirely so partial

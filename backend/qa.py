@@ -188,7 +188,14 @@ def make_qa_router(current_user_dep, db_getter):
         passed_tests = (test_report or {}).get('passed', 0)
         failed_tests = (test_report or {}).get('failed', 0)
         e2e_pass = (test_report or {}).get('e2e_pass', None)
-        perf_pass = (perf_report or {}).get('targets_met', None)
+        # Honor either schema (target_met from auth_register_perf.json,
+        # targets_met from locust perf_summary.json).
+        perf_pass = None
+        if perf_report:
+            if 'target_met' in perf_report:
+                perf_pass = bool(perf_report['target_met'])
+            elif 'targets_met' in perf_report:
+                perf_pass = bool(perf_report['targets_met'])
 
         release_ready = (
             open_blockers == 0
