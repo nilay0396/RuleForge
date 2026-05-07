@@ -1,10 +1,9 @@
 """Seed deterministic test users for QA / UAT runs.
 
-Usage (from /app):
+Usage (from the repository root):
   python scripts/seed_test_users.py
 
 Idempotent. Will not duplicate existing users.
-Updates /app/memory/test_credentials.md with the latest seed.
 """
 import asyncio
 import os
@@ -13,10 +12,12 @@ import uuid
 import hashlib
 import secrets
 from datetime import datetime, timezone
+from pathlib import Path
 
-sys.path.insert(0, '/app/backend')
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'backend'))
 from dotenv import load_dotenv
-load_dotenv('/app/backend/.env')
+load_dotenv(ROOT / 'backend' / '.env')
 from motor.motor_asyncio import AsyncIOMotorClient
 
 try:

@@ -1,17 +1,18 @@
 """Aggregate latest pytest run into a small JSON for the QA dashboard.
 Reads pytest_raw.json (if produced by pytest-json-report) or scrapes the
-textual summary file. Writes /app/test_reports/pytest_summary.json.
+textual summary file. Writes test_reports/pytest_summary.json.
 """
 import json
-import os
 import re
 import subprocess
 from datetime import datetime, timezone
+from pathlib import Path
 
-REPORT_DIR = '/app/test_reports'
-os.makedirs(REPORT_DIR, exist_ok=True)
-RAW = os.path.join(REPORT_DIR, 'pytest_raw.json')
-OUT = os.path.join(REPORT_DIR, 'pytest_summary.json')
+ROOT = Path(__file__).resolve().parents[1]
+REPORT_DIR = ROOT / 'test_reports'
+REPORT_DIR.mkdir(exist_ok=True)
+RAW = REPORT_DIR / 'pytest_raw.json'
+OUT = REPORT_DIR / 'pytest_summary.json'
 
 
 def run_pytest_summary():
@@ -19,7 +20,7 @@ def run_pytest_summary():
     proc = subprocess.run(
         ['python', '-m', 'pytest', '-q', '--tb=no', '-W', 'ignore::DeprecationWarning',
          'unit', 'api'],
-        cwd='/app/tests', capture_output=True, text=True, timeout=600,
+        cwd=ROOT / 'tests', capture_output=True, text=True, timeout=600,
     )
     out = (proc.stdout or '') + '\n' + (proc.stderr or '')
     m = re.search(r'(\d+) passed', out)
@@ -43,11 +44,11 @@ def run_pytest_summary():
 
 def parse_e2e_report():
     """Read Playwright JSON reporter output for E2E summary."""
-    path = '/app/test_reports/e2e-results.json'
-    if not os.path.exists(path):
+    path = REPORT_DIR / 'e2e-results.json'
+    if not path.exists():
         return None
     try:
-        with open(path) as f:
+        with path.open() as f:
             data = json.load(f)
     except Exception:
         return None
@@ -69,7 +70,7 @@ def main():
     e2e = parse_e2e_report()
     summary['e2e'] = e2e
     summary['e2e_pass'] = (e2e or {}).get('pass') if e2e is not None else None
-    with open(OUT, 'w') as f:
+    with OUT.open('w') as f:
         json.dump(summary, f, indent=2)
     print(f'Wrote {OUT}: {summary["passed"]} passed, {summary["failed"]} failed; E2E={summary["e2e_pass"]}.')
 

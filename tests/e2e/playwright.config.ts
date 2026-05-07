@@ -1,6 +1,8 @@
 import { defineConfig, devices } from '@playwright/test';
+import path from 'node:path';
 
 const BASE_URL = process.env.E2E_BASE_URL || 'http://localhost:3000';
+const REPORT_DIR = path.resolve(__dirname, '..', '..', 'test_reports');
 
 export default defineConfig({
   testDir: './specs',
@@ -10,8 +12,8 @@ export default defineConfig({
   workers: 1,
   reporter: [
     ['list'],
-    ['html', { outputFolder: '/app/test_reports/e2e-html', open: 'never' }],
-    ['json', { outputFile: '/app/test_reports/e2e-results.json' }],
+    ['html', { outputFolder: path.join(REPORT_DIR, 'e2e-html'), open: 'never' }],
+    ['json', { outputFile: path.join(REPORT_DIR, 'e2e-results.json') }],
   ],
   timeout: 60_000,
   expect: { timeout: 10_000 },

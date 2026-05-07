@@ -5,11 +5,12 @@ Lightweight: spins up an httpx.AsyncClient against the running FastAPI server
 """
 import os
 import uuid
+from pathlib import Path
 import pytest_asyncio
 import httpx
 from dotenv import load_dotenv
 
-load_dotenv('/app/backend/.env')
+load_dotenv(Path(__file__).resolve().parents[1] / 'backend' / '.env')
 
 BACKEND = os.environ.get('TEST_BACKEND_URL', 'http://localhost:8001')
 API = f"{BACKEND}/api"
