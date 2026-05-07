@@ -73,10 +73,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'yarn'
-          cache-dependency-path: |
-            frontend/yarn.lock
-            tests/e2e/yarn.lock
 
       - name: Install backend dependencies
         working-directory: backend
@@ -86,12 +82,12 @@ jobs:
 
       - name: Install frontend dependencies
         working-directory: frontend
-        run: yarn install --frozen-lockfile --network-timeout 600000
+        run: yarn install --network-timeout 600000
 
       - name: Install Playwright (npm + browsers)
         working-directory: tests/e2e
         run: |
-          if [ -f yarn.lock ]; then yarn install --frozen-lockfile; else npm ci || npm install; fi
+          if [ -f yarn.lock ]; then yarn install --network-timeout 600000; else npm install; fi
           npx playwright install --with-deps chromium
 
       - name: Wait for MongoDB

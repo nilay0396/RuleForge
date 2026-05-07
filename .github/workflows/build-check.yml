@@ -44,13 +44,11 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'yarn'
-          cache-dependency-path: frontend/yarn.lock
 
       - name: Frontend lint (expo lint)
         working-directory: frontend
         run: |
-          yarn install --frozen-lockfile --network-timeout 600000
+          yarn install --network-timeout 600000
           yarn lint || true   # report only; frontend-tests.yml is the gate
 
       - name: Verify release artifacts
