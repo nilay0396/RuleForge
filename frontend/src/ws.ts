@@ -4,6 +4,9 @@ import { Platform } from 'react-native';
 import { getToken } from './api';
 
 type Listener = (msg: any) => void;
+export type SendResult =
+  | { ok: true }
+  | { ok: false; reason: 'disconnected' | 'serialize_failed' | 'send_failed'; error?: unknown };
 
 const BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -34,11 +37,28 @@ class RealtimeClient {
     return () => this.listeners.delete(fn);
   }
 
-  send(msg: any): void {
-    if (!this.socket || this.socket.readyState !== 1) return;
+  send(msg: any): SendResult {
+    if (!this.socket || this.socket.readyState !== 1) {
+      const result: SendResult = { ok: false, reason: 'disconnected' };
+      this.emit({ type: '__send_failed', message: msg, reason: result.reason });
+      return result;
+    }
+    let payload: string;
     try {
-      this.socket.send(JSON.stringify(msg));
-    } catch {}
+      payload = JSON.stringify(msg);
+    } catch (error) {
+      const result: SendResult = { ok: false, reason: 'serialize_failed', error };
+      this.emit({ type: '__send_failed', message: msg, reason: result.reason, error });
+      return result;
+    }
+    try {
+      this.socket.send(payload);
+      return { ok: true };
+    } catch (error) {
+      const result: SendResult = { ok: false, reason: 'send_failed', error };
+      this.emit({ type: '__send_failed', message: msg, reason: result.reason, error });
+      return result;
+    }
   }
 
   async connect(): Promise<void> {
@@ -64,8 +84,8 @@ class RealtimeClient {
           this.emit(msg);
         } catch {}
       };
-      ws.onerror = () => {
-        // onclose will follow; nothing to do here
+      ws.onerror = (error) => {
+        this.emit({ type: '__socket_error', error });
       };
       ws.onclose = () => {
         this.connecting = false;

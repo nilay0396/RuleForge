@@ -22,6 +22,9 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 logger = logging.getLogger("ruleforge.realtime")
 
 JWT_ALGORITHM = "HS256"
+CLASSIC_RULE_KEY = "classic"
+DEFAULT_TIME_CONTROL = os.environ.get("ONLINE_DEFAULT_TIME_CONTROL", "10+0")
+CLOCK_GRACE_MS = 250
 
 # ---------------------------------------------------------------------------
 # In-memory state
@@ -158,6 +161,55 @@ def _elo_delta(player_rating: int, opponent_rating: int, result: str, k: int = 3
     return int(round(k * (score - expected)))
 
 
+def _parse_dt(value: Any, fallback: Optional[datetime] = None) -> datetime:
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    if isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+        except Exception:
+            pass
+    return fallback or datetime.now(timezone.utc)
+
+
+def _parse_time_control(value: Optional[str]) -> Dict[str, Any]:
+    raw = (value or DEFAULT_TIME_CONTROL or "10+0").strip().lower()
+    if raw in {"none", "untimed"}:
+        return {"label": "untimed", "initial_ms": None, "increment_ms": 0}
+    if raw == "casual":
+        raw = DEFAULT_TIME_CONTROL or "10+0"
+
+    presets = {
+        "bullet": (60, 0),
+        "blitz": (300, 0),
+        "rapid": (600, 0),
+        "classic": (900, 10),
+    }
+    if raw in presets:
+        initial_seconds, increment_seconds = presets[raw]
+        return {"label": raw, "initial_ms": initial_seconds * 1000, "increment_ms": increment_seconds * 1000}
+
+    if "+" in raw:
+        base, inc = raw.split("+", 1)
+        base_num = float(base)
+        inc_num = float(inc)
+        initial_seconds = int(base_num * 60) if base_num <= 60 else int(base_num)
+        return {
+            "label": raw,
+            "initial_ms": max(1, initial_seconds) * 1000,
+            "increment_ms": max(0, int(inc_num * 1000)),
+        }
+
+    base_num = float(raw)
+    initial_seconds = int(base_num * 60) if base_num <= 60 else int(base_num)
+    return {"label": raw, "initial_ms": max(1, initial_seconds) * 1000, "increment_ms": 0}
+
+
+def validate_time_control(value: Optional[str]) -> None:
+    _parse_time_control(value)
+
+
 class LiveGame:
     def __init__(
         self,
@@ -173,16 +225,25 @@ class LiveGame:
         self.players = {"w": white_id, "b": black_id}
         self.player_rating = {"w": white_rating, "b": black_rating}
         self.rule_key = rule_key
-        self.time_control = time_control or "casual"
+        clock = _parse_time_control(time_control)
+        self.time_control = clock["label"]
+        self.clock_initial_ms: Optional[int] = clock["initial_ms"]
+        self.clock_increment_ms: int = clock["increment_ms"]
+        self.clock_remaining_ms: Dict[str, Optional[int]] = {
+            "w": self.clock_initial_ms,
+            "b": self.clock_initial_ms,
+        }
         self.board = pychess.Board()
         self.moves_san: List[str] = []
         self.status = "ongoing"  # 'ongoing' | 'finished' | 'abandoned'
         self.created_at = datetime.now(timezone.utc)
         self.last_activity = self.created_at
+        self.clock_updated_at = self.created_at
         # Disconnect tracking — user_id -> datetime of disconnect
         self.disconnected_at: Dict[str, datetime] = {}
         self.result: Optional[str] = None  # 'white' | 'black' | 'draw'
         self.reason: Optional[str] = None
+        self.draw_offer_by: Optional[str] = None
 
     def opponent_id(self, user_id: str) -> Optional[str]:
         for c, uid in self.players.items():
@@ -196,7 +257,89 @@ class LiveGame:
                 return c
         return None
 
+    @property
+    def clocks_enabled(self) -> bool:
+        return self.clock_initial_ms is not None
+
+    def effective_clock_remaining_ms(self, now: Optional[datetime] = None) -> Dict[str, Optional[int]]:
+        remaining = dict(self.clock_remaining_ms)
+        if not self.clocks_enabled or self.status != "ongoing":
+            return remaining
+        now = now or datetime.now(timezone.utc)
+        turn = "w" if self.board.turn else "b"
+        current = remaining.get(turn)
+        if current is None:
+            return remaining
+        elapsed_ms = max(0, int((now - self.clock_updated_at).total_seconds() * 1000))
+        remaining[turn] = max(0, current - elapsed_ms)
+        return remaining
+
+    def flag_winner(self, now: Optional[datetime] = None) -> Optional[str]:
+        if not self.clocks_enabled or self.status != "ongoing":
+            return None
+        turn = "w" if self.board.turn else "b"
+        remaining = self.effective_clock_remaining_ms(now).get(turn)
+        if remaining is not None and remaining <= 0:
+            return "black" if turn == "w" else "white"
+        return None
+
+    def spend_turn_time(self, color: str, now: Optional[datetime] = None) -> bool:
+        if not self.clocks_enabled:
+            return True
+        now = now or datetime.now(timezone.utc)
+        remaining = self.effective_clock_remaining_ms(now)
+        current = remaining.get(color)
+        if current is None or current <= 0:
+            self.clock_remaining_ms = remaining
+            self.clock_updated_at = now
+            return False
+        remaining[color] = current + self.clock_increment_ms
+        self.clock_remaining_ms = remaining
+        self.clock_updated_at = now
+        return True
+
+    @classmethod
+    def from_record(cls, record: Dict[str, Any]) -> "LiveGame":
+        game = cls(
+            str(record["id"]),
+            str(record["white_id"]),
+            str(record["black_id"]),
+            int(record.get("white_rating", 800)),
+            int(record.get("black_rating", 800)),
+            record.get("rule_key", CLASSIC_RULE_KEY),
+            record.get("time_control"),
+        )
+        game.moves_san = list(record.get("moves_san") or [])
+        if game.moves_san:
+            try:
+                board = pychess.Board()
+                for san in game.moves_san:
+                    board.push_san(san)
+                game.board = board
+            except Exception:
+                game.board = pychess.Board(record.get("fen") or pychess.STARTING_FEN)
+        else:
+            game.board = pychess.Board(record.get("fen") or pychess.STARTING_FEN)
+        game.status = record.get("status", "ongoing")
+        game.result = record.get("result")
+        game.reason = record.get("reason")
+        game.created_at = _parse_dt(record.get("created_at"), game.created_at)
+        game.last_activity = _parse_dt(record.get("last_activity"), game.created_at)
+        game.clock_updated_at = _parse_dt(record.get("clock_updated_at"), game.last_activity)
+        game.clock_initial_ms = record.get("clock_initial_ms", game.clock_initial_ms)
+        game.clock_increment_ms = int(record.get("clock_increment_ms", game.clock_increment_ms) or 0)
+        clocks = record.get("clock_remaining_ms") or record.get("clocks_ms")
+        if isinstance(clocks, dict):
+            game.clock_remaining_ms = {
+                "w": clocks.get("w") if clocks.get("w") is None else int(clocks.get("w")),
+                "b": clocks.get("b") if clocks.get("b") is None else int(clocks.get("b")),
+            }
+        game.draw_offer_by = record.get("draw_offer_by")
+        return game
+
     def to_dict(self) -> Dict[str, Any]:
+        clocks = self.effective_clock_remaining_ms()
+        draw_offer_color = self.color_of(self.draw_offer_by) if self.draw_offer_by else None
         return {
             "id": self.id,
             "white_id": self.players["w"],
@@ -208,10 +351,19 @@ class LiveGame:
             "moves_san": self.moves_san,
             "rule_key": self.rule_key,
             "time_control": self.time_control,
+            "clock_initial_ms": self.clock_initial_ms,
+            "clock_increment_ms": self.clock_increment_ms,
+            "clock_remaining_ms": clocks,
+            "clocks_ms": clocks,
+            "clock_updated_at": self.clock_updated_at.isoformat(),
+            "server_now": datetime.now(timezone.utc).isoformat(),
+            "draw_offer_by": self.draw_offer_by,
+            "draw_offer_color": draw_offer_color,
             "status": self.status,
             "result": self.result,
             "reason": self.reason,
             "created_at": self.created_at.isoformat(),
+            "last_activity": self.last_activity.isoformat(),
         }
 
 
@@ -232,6 +384,13 @@ class GameManager:
         time_control: Optional[str] = None,
     ) -> LiveGame:
         async with self._lock:
+            if white_id == black_id:
+                raise ValueError("players must be different")
+            for uid in (white_id, black_id):
+                for gid in self.user_games.get(uid, set()):
+                    g = self.games.get(gid)
+                    if g and g.status == "ongoing":
+                        raise ValueError("player already has an ongoing game")
             game_id = str(uuid.uuid4())
             g = LiveGame(game_id, white_id, black_id, white_rating, black_rating, rule_key, time_control)
             self.games[game_id] = g
@@ -241,6 +400,16 @@ class GameManager:
 
     async def get(self, game_id: str) -> Optional[LiveGame]:
         return self.games.get(game_id)
+
+    async def restore(self, game: LiveGame) -> LiveGame:
+        async with self._lock:
+            existing = self.games.get(game.id)
+            if existing:
+                return existing
+            self.games[game.id] = game
+            for uid in game.players.values():
+                self.user_games.setdefault(uid, set()).add(game.id)
+            return game
 
     async def remove(self, game_id: str) -> None:
         async with self._lock:
@@ -277,11 +446,29 @@ async def persist_game_record(db: AsyncIOMotorDatabase, game: LiveGame) -> None:
         {
             "$set": {
                 **game.to_dict(),
+                "player_ids": [game.players["w"], game.players["b"]],
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }
         },
         upsert=True,
     )
+
+
+async def has_ongoing_online_game(db: AsyncIOMotorDatabase, user_id: str) -> bool:
+    if await games.active_for_user(user_id):
+        return True
+    existing = await db.online_games.find_one(
+        {
+            "status": "ongoing",
+            "$or": [
+                {"player_ids": user_id},
+                {"white_id": user_id},
+                {"black_id": user_id},
+            ],
+        },
+        {"_id": 1},
+    )
+    return bool(existing)
 
 
 async def persist_move(db: AsyncIOMotorDatabase, game_id: str, player_id: str, san: str, fen: str) -> None:
@@ -295,6 +482,48 @@ async def persist_move(db: AsyncIOMotorDatabase, game_id: str, player_id: str, s
     })
 
 
+async def load_active_game_for_user(db: AsyncIOMotorDatabase, user_id: str) -> Optional[LiveGame]:
+    active = await games.active_for_user(user_id)
+    if active:
+        return active
+    record = await db.online_games.find_one(
+        {
+            "status": "ongoing",
+            "$or": [
+                {"player_ids": user_id},
+                {"white_id": user_id},
+                {"black_id": user_id},
+            ],
+        },
+        {"_id": 0},
+    )
+    if not record:
+        return None
+    try:
+        game = await games.restore(LiveGame.from_record(record))
+    except Exception:
+        logger.exception("failed to restore online game %s", record.get("id"))
+        return None
+    _schedule_clock_timeout(db, game)
+    return game
+
+
+async def load_game_by_id(db: AsyncIOMotorDatabase, game_id: str) -> Optional[LiveGame]:
+    game = await games.get(game_id)
+    if game:
+        return game
+    record = await db.online_games.find_one({"id": game_id, "status": "ongoing"}, {"_id": 0})
+    if not record:
+        return None
+    try:
+        game = await games.restore(LiveGame.from_record(record))
+    except Exception:
+        logger.exception("failed to restore online game %s", game_id)
+        return None
+    _schedule_clock_timeout(db, game)
+    return game
+
+
 async def finalize_game(
     db: AsyncIOMotorDatabase,
     game: LiveGame,
@@ -305,10 +534,6 @@ async def finalize_game(
 
     Returns rating change info: { white: {before, after, delta}, black: {...} }
     """
-    game.status = "finished"
-    game.result = result
-    game.reason = reason
-
     white_id = game.players["w"]
     black_id = game.players["b"]
     white_rating = game.player_rating["w"]
@@ -325,6 +550,48 @@ async def finalize_game(
     black_delta = _elo_delta(black_rating, white_rating, black_score)
     white_after = max(100, white_rating + white_delta)
     black_after = max(100, black_rating + black_delta)
+    rating_changes = {
+        "white": {"before": white_rating, "after": white_after, "delta": white_delta, "score": white_score},
+        "black": {"before": black_rating, "after": black_after, "delta": black_delta, "score": black_score},
+    }
+
+    game.status = "finished"
+    game.result = result
+    game.reason = reason
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    claim = await db.online_games.update_one(
+        {"id": game.id, "stats_finalized_at": {"$exists": False}},
+        {
+            "$set": {
+                **game.to_dict(),
+                "player_ids": [white_id, black_id],
+                "rating_changes": rating_changes,
+                "stats_finalized_at": now_iso,
+                "updated_at": now_iso,
+            }
+        },
+        upsert=False,
+    )
+    if claim.modified_count == 0:
+        existing = await db.online_games.find_one({"id": game.id}, {"_id": 0, "rating_changes": 1})
+        if existing and existing.get("rating_changes"):
+            return existing["rating_changes"]
+        if existing:
+            return rating_changes
+        try:
+            await db.online_games.insert_one({
+                **game.to_dict(),
+                "player_ids": [white_id, black_id],
+                "rating_changes": rating_changes,
+                "stats_finalized_at": now_iso,
+                "updated_at": now_iso,
+            })
+        except Exception:
+            existing = await db.online_games.find_one({"id": game.id}, {"_id": 0, "rating_changes": 1})
+            if existing and existing.get("rating_changes"):
+                return existing["rating_changes"]
+            return rating_changes
 
     # Update users
     async def _update(user_id: str, score: str, delta: int, before: int, after: int, opp_rating: int):
@@ -375,12 +642,63 @@ async def finalize_game(
 
     await _update(white_id, white_score, white_delta, white_rating, white_after, black_rating)
     await _update(black_id, black_score, black_delta, black_rating, black_after, white_rating)
-    await persist_game_record(db, game)
 
-    return {
-        "white": {"before": white_rating, "after": white_after, "delta": white_delta, "score": white_score},
-        "black": {"before": black_rating, "after": black_after, "delta": black_delta, "score": black_score},
-    }
+    return rating_changes
+
+
+async def _broadcast_game_over(
+    db: AsyncIOMotorDatabase,
+    game: LiveGame,
+    winner: str,
+    reason: str,
+) -> Dict[str, Dict[str, int]]:
+    ratings = await finalize_game(db, game, winner, reason)
+    for color_key, uid in game.players.items():
+        user_score = ratings["white" if color_key == "w" else "black"]
+        await connection_manager.send_to_user(uid, {
+            "type": "game_over",
+            "game_id": game.id,
+            "result": user_score["score"],
+            "reason": reason,
+            "rating_before": user_score["before"],
+            "rating_after": user_score["after"],
+            "delta": user_score["delta"],
+        })
+    await games.remove(game.id)
+    return ratings
+
+
+async def _check_clock_timeout(db: AsyncIOMotorDatabase, game: LiveGame) -> bool:
+    winner = game.flag_winner()
+    if not winner:
+        return False
+    game.clock_remaining_ms = game.effective_clock_remaining_ms()
+    game.clock_updated_at = datetime.now(timezone.utc)
+    await _broadcast_game_over(db, game, winner, "Time forfeit")
+    return True
+
+
+def _schedule_clock_timeout(db: AsyncIOMotorDatabase, game: LiveGame) -> None:
+    if not game.clocks_enabled or game.status != "ongoing":
+        return
+    turn = "w" if game.board.turn else "b"
+    remaining = game.effective_clock_remaining_ms().get(turn)
+    if remaining is None:
+        return
+    delay = max(0, remaining + CLOCK_GRACE_MS) / 1000
+    asyncio.create_task(_clock_timeout_watch(db, game.id, delay))
+
+
+def schedule_clock_timeout(db: AsyncIOMotorDatabase, game: LiveGame) -> None:
+    _schedule_clock_timeout(db, game)
+
+
+async def _clock_timeout_watch(db: AsyncIOMotorDatabase, game_id: str, delay: float) -> None:
+    await asyncio.sleep(delay)
+    game = await games.get(game_id)
+    if not game or game.status != "ongoing":
+        return
+    await _check_clock_timeout(db, game)
 
 
 # ---------------------------------------------------------------------------
@@ -465,7 +783,7 @@ async def ws_endpoint(websocket: WebSocket):
     became_online = await connection_manager.connect(user_id, websocket, meta)
 
     # If user has an active game and was disconnected — clear their disconnect timer & resync
-    active = await games.active_for_user(user_id)
+    active = await load_active_game_for_user(db, user_id)
     if active and user_id in active.disconnected_at:
         active.disconnected_at.pop(user_id, None)
         opp = active.opponent_id(user_id)
@@ -477,6 +795,9 @@ async def ws_endpoint(websocket: WebSocket):
 
     # Initial state
     await _send(websocket, {"type": "hello", "user": meta})
+    if active:
+        if await _check_clock_timeout(db, active):
+            active = None
     if active:
         await _send(websocket, {
             "type": "game_state",
@@ -510,9 +831,17 @@ async def ws_endpoint(websocket: WebSocket):
                     await _handle_make_move(db, user_id, msg, websocket)
                 elif mtype == "resign":
                     await _handle_resign(db, user_id, msg, websocket)
+                elif mtype in {"draw_offer", "offer_draw"}:
+                    await _handle_draw_offer(db, user_id, msg, websocket)
+                elif mtype in {"draw_accept", "accept_draw"}:
+                    await _handle_draw_accept(db, user_id, msg, websocket)
+                elif mtype in {"draw_decline", "decline_draw"}:
+                    await _handle_draw_decline(db, user_id, msg, websocket)
                 elif mtype == "request_game_state":
-                    g = await games.get(msg.get("game_id", ""))
+                    g = await load_game_by_id(db, msg.get("game_id", ""))
                     if g and user_id in g.players.values():
+                        if await _check_clock_timeout(db, g):
+                            continue
                         await _send(websocket, {
                             "type": "game_state",
                             "game": g.to_dict(),
@@ -544,7 +873,20 @@ async def ws_endpoint(websocket: WebSocket):
 
 
 async def _handle_find_match(db, user_id: str, msg: Dict[str, Any], ws: WebSocket) -> None:
-    rule_key = msg.get("rule_key", "classic")
+    rule_key = msg.get("rule_key", CLASSIC_RULE_KEY)
+    if rule_key != CLASSIC_RULE_KEY:
+        await _send(ws, {"type": "error", "error": "online multiplayer currently supports classic only"})
+        return
+    time_control = msg.get("time_control") or DEFAULT_TIME_CONTROL
+    try:
+        _parse_time_control(time_control)
+    except Exception:
+        await _send(ws, {"type": "error", "error": "invalid time control"})
+        return
+    if await has_ongoing_online_game(db, user_id):
+        await matchmaking.remove(user_id)
+        await _send(ws, {"type": "error", "error": "already in an ongoing game"})
+        return
     user = await db.users.find_one({"id": user_id}, {"_id": 0, "name": 1, "elo": 1})
     if not user:
         await _send(ws, {"type": "error", "error": "user not found"})
@@ -554,6 +896,11 @@ async def _handle_find_match(db, user_id: str, msg: Dict[str, Any], ws: WebSocke
     if not opp:
         await _send(ws, {"type": "searching", "rule_key": rule_key})
         return
+    if await has_ongoing_online_game(db, user_id) or await has_ongoing_online_game(db, opp["user_id"]):
+        await matchmaking.remove(user_id)
+        await matchmaking.remove(opp["user_id"])
+        await _send(ws, {"type": "error", "error": "player already has an ongoing game"})
+        return
     # Pair found — randomly assign colors
     import random
     if random.random() < 0.5:
@@ -562,8 +909,16 @@ async def _handle_find_match(db, user_id: str, msg: Dict[str, Any], ws: WebSocke
     else:
         white_id, black_id = opp["user_id"], user_id
         white_rating, black_rating = opp["rating"], rating
-    game = await games.create(white_id, black_id, white_rating, black_rating, rule_key=rule_key)
-    await persist_game_record(db, game)
+    game = None
+    try:
+        game = await games.create(white_id, black_id, white_rating, black_rating, rule_key=rule_key, time_control=time_control)
+        await persist_game_record(db, game)
+    except Exception:
+        if game:
+            await games.remove(game.id)
+        logger.exception("failed to create online match")
+        await _send(ws, {"type": "error", "error": "player already has an ongoing game"})
+        return
 
     white_user = await db.users.find_one({"id": white_id}, {"_id": 0, "name": 1, "elo": 1})
     black_user = await db.users.find_one({"id": black_id}, {"_id": 0, "name": 1, "elo": 1})
@@ -572,12 +927,17 @@ async def _handle_find_match(db, user_id: str, msg: Dict[str, Any], ws: WebSocke
         "type": "match_found",
         "game_id": game.id,
         "rule_key": rule_key,
+        "time_control": game.time_control,
         "fen": game.board.fen(),
+        "clock_initial_ms": game.clock_initial_ms,
+        "clock_increment_ms": game.clock_increment_ms,
+        "clock_remaining_ms": game.effective_clock_remaining_ms(),
         "white": {"id": white_id, "name": white_user.get("name", "Player"), "elo": white_rating},
         "black": {"id": black_id, "name": black_user.get("name", "Player"), "elo": black_rating},
     }
     await connection_manager.send_to_user(white_id, {**base, "your_color": "w"})
     await connection_manager.send_to_user(black_id, {**base, "your_color": "b"})
+    _schedule_clock_timeout(db, game)
 
 
 async def _handle_make_move(db, user_id: str, msg: Dict[str, Any], ws: WebSocket) -> None:
@@ -593,6 +953,8 @@ async def _handle_make_move(db, user_id: str, msg: Dict[str, Any], ws: WebSocket
     expected = "w" if g.board.turn else "b"
     if color != expected:
         await _send(ws, {"type": "error", "error": "not your turn"})
+        return
+    if await _check_clock_timeout(db, g):
         return
 
     from_sq = msg.get("from")
@@ -618,10 +980,15 @@ async def _handle_make_move(db, user_id: str, msg: Dict[str, Any], ws: WebSocket
         await _send(ws, {"type": "error", "error": "illegal move"})
         return
 
+    if not g.spend_turn_time(color):
+        await _broadcast_game_over(db, g, "black" if color == "w" else "white", "Time forfeit")
+        return
     san = g.board.san(move)
     g.board.push(move)
     g.moves_san.append(san)
     g.last_activity = datetime.now(timezone.utc)
+    if g.draw_offer_by and g.draw_offer_by != user_id:
+        g.draw_offer_by = None
     await persist_move(db, g.id, user_id, san, g.board.fen())
     await persist_game_record(db, g)
 
@@ -636,6 +1003,11 @@ async def _handle_make_move(db, user_id: str, msg: Dict[str, Any], ws: WebSocket
         "turn": "w" if g.board.turn else "b",
         "by": color,
         "is_check": g.board.is_check(),
+        "clock_remaining_ms": g.effective_clock_remaining_ms(),
+        "clocks_ms": g.effective_clock_remaining_ms(),
+        "server_now": datetime.now(timezone.utc).isoformat(),
+        "draw_offer_by": g.draw_offer_by,
+        "draw_offer_color": g.color_of(g.draw_offer_by) if g.draw_offer_by else None,
     }
     for uid in g.players.values():
         await connection_manager.send_to_user(uid, payload)
@@ -660,19 +1032,9 @@ async def _handle_make_move(db, user_id: str, msg: Dict[str, Any], ws: WebSocket
             winner = "draw"
             reason = "Draw"
 
-        ratings = await finalize_game(db, g, winner, reason)
-        for color_key, uid in g.players.items():
-            user_score = ratings["white" if color_key == "w" else "black"]
-            await connection_manager.send_to_user(uid, {
-                "type": "game_over",
-                "game_id": g.id,
-                "result": user_score["score"],  # 'win' | 'loss' | 'draw'
-                "reason": reason,
-                "rating_before": user_score["before"],
-                "rating_after": user_score["after"],
-                "delta": user_score["delta"],
-            })
-        await games.remove(g.id)
+        await _broadcast_game_over(db, g, winner, reason)
+    else:
+        _schedule_clock_timeout(db, g)
 
 
 async def _handle_resign(db, user_id: str, msg: Dict[str, Any], ws: WebSocket) -> None:
@@ -685,20 +1047,81 @@ async def _handle_resign(db, user_id: str, msg: Dict[str, Any], ws: WebSocket) -
     if not color:
         await _send(ws, {"type": "error", "error": "not in this game"})
         return
+    if await _check_clock_timeout(db, g):
+        return
     winner = "black" if color == "w" else "white"
-    ratings = await finalize_game(db, g, winner, "Resignation")
-    for color_key, uid in g.players.items():
-        user_score = ratings["white" if color_key == "w" else "black"]
-        await connection_manager.send_to_user(uid, {
-            "type": "game_over",
-            "game_id": g.id,
-            "result": user_score["score"],
-            "reason": "Resignation",
-            "rating_before": user_score["before"],
-            "rating_after": user_score["after"],
-            "delta": user_score["delta"],
-        })
-    await games.remove(g.id)
+    await _broadcast_game_over(db, g, winner, "Resignation")
+
+
+async def _get_user_game_from_msg(db, user_id: str, msg: Dict[str, Any]) -> Optional[LiveGame]:
+    game_id = msg.get("game_id")
+    game = await load_game_by_id(db, game_id) if game_id else await load_active_game_for_user(db, user_id)
+    if not game or game.status != "ongoing" or user_id not in game.players.values():
+        return None
+    return game
+
+
+async def _handle_draw_offer(db, user_id: str, msg: Dict[str, Any], ws: WebSocket) -> None:
+    g = await _get_user_game_from_msg(db, user_id, msg)
+    if not g:
+        await _send(ws, {"type": "error", "error": "no active game"})
+        return
+    if await _check_clock_timeout(db, g):
+        return
+    g.draw_offer_by = user_id
+    g.last_activity = datetime.now(timezone.utc)
+    await persist_game_record(db, g)
+    payload = {
+        "type": "draw_offered",
+        "game_id": g.id,
+        "by": g.color_of(user_id),
+        "by_user_id": user_id,
+        "game": g.to_dict(),
+    }
+    for uid in g.players.values():
+        await connection_manager.send_to_user(uid, payload)
+
+
+async def _handle_draw_accept(db, user_id: str, msg: Dict[str, Any], ws: WebSocket) -> None:
+    g = await _get_user_game_from_msg(db, user_id, msg)
+    if not g:
+        await _send(ws, {"type": "error", "error": "no active game"})
+        return
+    if await _check_clock_timeout(db, g):
+        return
+    if not g.draw_offer_by:
+        await _send(ws, {"type": "error", "error": "no draw offer pending"})
+        return
+    if g.draw_offer_by == user_id:
+        await _send(ws, {"type": "error", "error": "cannot accept your own draw offer"})
+        return
+    g.draw_offer_by = None
+    await _broadcast_game_over(db, g, "draw", "Draw agreed")
+
+
+async def _handle_draw_decline(db, user_id: str, msg: Dict[str, Any], ws: WebSocket) -> None:
+    g = await _get_user_game_from_msg(db, user_id, msg)
+    if not g:
+        await _send(ws, {"type": "error", "error": "no active game"})
+        return
+    if not g.draw_offer_by:
+        await _send(ws, {"type": "error", "error": "no draw offer pending"})
+        return
+    if g.draw_offer_by == user_id:
+        await _send(ws, {"type": "error", "error": "cannot decline your own draw offer"})
+        return
+    g.draw_offer_by = None
+    g.last_activity = datetime.now(timezone.utc)
+    await persist_game_record(db, g)
+    payload = {
+        "type": "draw_declined",
+        "game_id": g.id,
+        "by": g.color_of(user_id),
+        "by_user_id": user_id,
+        "game": g.to_dict(),
+    }
+    for uid in g.players.values():
+        await connection_manager.send_to_user(uid, payload)
 
 
 async def _abandonment_watch(db, game_id: str, user_id: str) -> None:
@@ -712,19 +1135,7 @@ async def _abandonment_watch(db, game_id: str, user_id: str) -> None:
     # Opponent wins
     color = g.color_of(user_id)
     winner = "black" if color == "w" else "white"
-    ratings = await finalize_game(db, g, winner, "Opponent abandoned")
-    for color_key, uid in g.players.items():
-        user_score = ratings["white" if color_key == "w" else "black"]
-        await connection_manager.send_to_user(uid, {
-            "type": "game_over",
-            "game_id": g.id,
-            "result": user_score["score"],
-            "reason": "Opponent abandoned",
-            "rating_before": user_score["before"],
-            "rating_after": user_score["after"],
-            "delta": user_score["delta"],
-        })
-    await games.remove(g.id)
+    await _broadcast_game_over(db, g, winner, "Opponent abandoned")
 
 
 # ---------------------------------------------------------------------------

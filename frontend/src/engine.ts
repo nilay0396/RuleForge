@@ -91,6 +91,22 @@ export class RuleChess {
     return this.history.map((h) => h.san);
   }
 
+  loadFen(fen: string, movesSan: string[] = []): boolean {
+    try {
+      this.game.load(fen);
+      this.history = movesSan.map((san) => ({
+        san,
+        fenBefore: '',
+        fenAfter: '',
+        flagsBefore: { ...this.flags },
+      }));
+      this.lastMove = null;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   pieceAt(s: SquareName) {
     return this.game.get(s);
   }

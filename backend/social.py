@@ -8,7 +8,17 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
-from realtime import connection_manager, games, persist_game_record, notify_user, is_online
+from realtime import (
+    CLASSIC_RULE_KEY,
+    connection_manager,
+    games,
+    has_ongoing_online_game,
+    persist_game_record,
+    notify_user,
+    is_online,
+    schedule_clock_timeout,
+    validate_time_control,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -196,11 +206,21 @@ def make_social_router(current_user_dep, db_getter):
     @router.post("/challenges")
     async def create_challenge(payload: ChallengeIn, request: Request, user=Depends(current_user_dep)):
         db = db_getter(request)
+        if payload.rule_key != CLASSIC_RULE_KEY:
+            raise HTTPException(400, "Online challenges currently support classic only")
+        try:
+            validate_time_control(payload.time_control)
+        except Exception:
+            raise HTTPException(400, "Invalid time control")
         if payload.receiver_id == user["id"]:
             raise HTTPException(400, "Cannot challenge yourself")
         target = await db.users.find_one({"id": payload.receiver_id}, {"_id": 0, "id": 1, "name": 1})
         if not target:
             raise HTTPException(404, "User not found")
+        if await has_ongoing_online_game(db, user["id"]):
+            raise HTTPException(400, "You already have an ongoing game")
+        if await has_ongoing_online_game(db, payload.receiver_id):
+            raise HTTPException(400, "User already has an ongoing game")
         doc = {
             "id": str(uuid.uuid4()),
             "sender_id": user["id"],
@@ -224,16 +244,38 @@ def make_social_router(current_user_dep, db_getter):
     @router.post("/challenges/{cid}/accept")
     async def accept_challenge(cid: str, request: Request, user=Depends(current_user_dep)):
         db = db_getter(request)
+        now_iso = datetime.now(timezone.utc).isoformat()
         c = await db.challenges.find_one({"id": cid})
         if not c or c.get("receiver_id") != user["id"]:
             raise HTTPException(404, "Challenge not found")
         if c.get("status") != "pending":
             raise HTTPException(400, f"Already {c.get('status')}")
-        # Mark accepted
-        await db.challenges.update_one(
-            {"id": cid},
-            {"$set": {"status": "accepted", "accepted_at": datetime.now(timezone.utc).isoformat()}},
+        if c.get("rule_key", CLASSIC_RULE_KEY) != CLASSIC_RULE_KEY:
+            raise HTTPException(400, "Online challenges currently support classic only")
+        if c.get("expires_at") and c["expires_at"] <= now_iso:
+            await db.challenges.update_one({"id": cid, "status": "pending"}, {"$set": {"status": "expired"}})
+            raise HTTPException(400, "Challenge expired")
+        if await has_ongoing_online_game(db, c["sender_id"]) or await has_ongoing_online_game(db, c["receiver_id"]):
+            raise HTTPException(400, "Player already has an ongoing game")
+        claim = await db.challenges.update_one(
+            {
+                "id": cid,
+                "receiver_id": user["id"],
+                "status": "pending",
+                "$or": [
+                    {"expires_at": {"$gt": now_iso}},
+                    {"expires_at": {"$exists": False}},
+                    {"expires_at": None},
+                ],
+            },
+            {"$set": {"status": "accepting", "accepted_at": now_iso}},
         )
+        if claim.modified_count == 0:
+            current = await db.challenges.find_one({"id": cid}, {"_id": 0, "status": 1, "expires_at": 1})
+            if current and current.get("expires_at") and current["expires_at"] <= now_iso:
+                await db.challenges.update_one({"id": cid, "status": "pending"}, {"$set": {"status": "expired"}})
+                raise HTTPException(400, "Challenge expired")
+            raise HTTPException(400, f"Already {current.get('status') if current else 'updated'}")
         # Create live game between sender (white) and receiver (black) — coin flip
         import random
         sender = await db.users.find_one({"id": c["sender_id"]}, {"_id": 0, "id": 1, "name": 1, "elo": 1})
@@ -246,22 +288,48 @@ def make_social_router(current_user_dep, db_getter):
         else:
             white_id, black_id = receiver["id"], sender["id"]
             white_rating, black_rating = int(receiver.get("elo", 800)), int(sender.get("elo", 800))
-        game = await games.create(white_id, black_id, white_rating, black_rating, rule_key=c.get("rule_key", "classic"))
-        await persist_game_record(db, game)
+        game = None
+        try:
+            game = await games.create(
+                white_id,
+                black_id,
+                white_rating,
+                black_rating,
+                rule_key=CLASSIC_RULE_KEY,
+                time_control=c.get("time_control"),
+            )
+            await persist_game_record(db, game)
+        except Exception:
+            if game:
+                await games.remove(game.id)
+            await db.challenges.update_one(
+                {"id": cid, "status": "accepting"},
+                {"$set": {"status": "failed", "failed_at": datetime.now(timezone.utc).isoformat()}},
+            )
+            raise HTTPException(400, "Player already has an ongoing game")
+        await db.challenges.update_one(
+            {"id": cid, "status": "accepting"},
+            {"$set": {"status": "accepted", "game_id": game.id}},
+        )
 
         white_user = await db.users.find_one({"id": white_id}, {"_id": 0, "id": 1, "name": 1, "elo": 1})
         black_user = await db.users.find_one({"id": black_id}, {"_id": 0, "id": 1, "name": 1, "elo": 1})
         base = {
             "type": "match_found",
             "game_id": game.id,
-            "rule_key": c.get("rule_key", "classic"),
+            "rule_key": CLASSIC_RULE_KEY,
+            "time_control": game.time_control,
             "fen": game.board.fen(),
+            "clock_initial_ms": game.clock_initial_ms,
+            "clock_increment_ms": game.clock_increment_ms,
+            "clock_remaining_ms": game.effective_clock_remaining_ms(),
             "white": {"id": white_id, "name": white_user.get("name", "Player"), "elo": white_rating},
             "black": {"id": black_id, "name": black_user.get("name", "Player"), "elo": black_rating},
             "challenge_id": cid,
         }
         await connection_manager.send_to_user(white_id, {**base, "your_color": "w"})
         await connection_manager.send_to_user(black_id, {**base, "your_color": "b"})
+        schedule_clock_timeout(db, game)
         return {"ok": True, "game_id": game.id}
 
     @router.post("/challenges/{cid}/reject")
