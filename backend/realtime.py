@@ -11,13 +11,14 @@ import json
 import logging
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Set
 
 import chess as pychess
 import jwt
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 from motor.motor_asyncio import AsyncIOMotorDatabase
+from pymongo import ReturnDocument
 
 logger = logging.getLogger("ruleforge.realtime")
 
@@ -94,15 +95,17 @@ connection_manager = ConnectionManager()
 
 
 class MatchmakingQueue:
-    """Simple in-memory queue keyed by rule_key.
+    """Mongo-backed queue keyed by rule_key and time_control.
 
     Each waiter is (user_id, rating, joined_at). On every find_match request
     we scan existing waiters and pair the first one within rating tolerance.
     Tolerance expands with wait time: ±200 base, +50 per extra second.
     """
 
+    STALE_WAIT_SECONDS = 90
+    STALE_CLAIM_SECONDS = 30
+
     def __init__(self) -> None:
-        self._waiters: Dict[str, List[Dict[str, Any]]] = {}
         self._lock = asyncio.Lock()
 
     @staticmethod
@@ -114,33 +117,87 @@ class MatchmakingQueue:
         elapsed = (MatchmakingQueue._now() - joined_at).total_seconds()
         return min(200 + int(elapsed) * 50, 800)
 
+    async def _cleanup(self, db: AsyncIOMotorDatabase, now: datetime) -> None:
+        await db.online_matchmaking.delete_many(
+            {
+                "$or": [
+                    {"status": "waiting", "expires_at": {"$lte": now}},
+                    {
+                        "status": {"$ne": "waiting"},
+                        "updated_at": {"$lte": now - timedelta(seconds=self.STALE_CLAIM_SECONDS)},
+                    },
+                ]
+            }
+        )
+
     async def add_or_pair(
-        self, user_id: str, rating: int, rule_key: str
+        self,
+        db: AsyncIOMotorDatabase,
+        user_id: str,
+        rating: int,
+        rule_key: str,
+        time_control: str,
     ) -> Optional[Dict[str, Any]]:
+        now = self._now()
         async with self._lock:
-            queue = self._waiters.setdefault(rule_key, [])
-            # Scan for an opponent
-            for i, w in enumerate(queue):
-                if w["user_id"] == user_id:
+            await self._cleanup(db, now)
+            await self.remove(db, user_id, rule_key)
+
+            query = {
+                "rule_key": rule_key,
+                "time_control": time_control,
+                "status": "waiting",
+                "user_id": {"$ne": user_id},
+            }
+            cursor = db.online_matchmaking.find(query, {"_id": 0}).sort("joined_at", 1).limit(50)
+            async for waiter in cursor:
+                joined_at = _parse_dt(waiter.get("joined_at"), now)
+                tolerance = max(self._tolerance(joined_at), 200)
+                if abs(int(waiter.get("rating", 800)) - rating) > tolerance:
                     continue
-                tol = max(self._tolerance(w["joined_at"]), 200)
-                if abs(w["rating"] - rating) <= tol:
-                    queue.pop(i)
-                    return w
-            # No opponent — add self
-            # Remove any stale entry for this user, then append
-            queue[:] = [w for w in queue if w["user_id"] != user_id]
-            queue.append({"user_id": user_id, "rating": rating, "joined_at": self._now()})
+                claimed = await db.online_matchmaking.find_one_and_update(
+                    {"id": waiter["id"], "status": "waiting"},
+                    {
+                        "$set": {
+                            "status": "paired",
+                            "paired_by": user_id,
+                            "updated_at": now,
+                        }
+                    },
+                    projection={"_id": 0},
+                    return_document=ReturnDocument.AFTER,
+                )
+                if claimed:
+                    return claimed
+            # No opponent, so publish this player for any backend worker.
+            doc = {
+                "id": f"{rule_key}:{time_control}:{user_id}",
+                "user_id": user_id,
+                "rating": rating,
+                "rule_key": rule_key,
+                "time_control": time_control,
+                "status": "waiting",
+                "joined_at": now,
+                "updated_at": now,
+                "expires_at": now + timedelta(seconds=self.STALE_WAIT_SECONDS),
+            }
+            await db.online_matchmaking.update_one(
+                {"id": doc["id"]},
+                {"$set": doc},
+                upsert=True,
+            )
             return None
 
-    async def remove(self, user_id: str, rule_key: Optional[str] = None) -> None:
-        async with self._lock:
-            keys = [rule_key] if rule_key else list(self._waiters.keys())
-            for k in keys:
-                q = self._waiters.get(k)
-                if not q:
-                    continue
-                q[:] = [w for w in q if w["user_id"] != user_id]
+    async def remove(
+        self,
+        db: AsyncIOMotorDatabase,
+        user_id: str,
+        rule_key: Optional[str] = None,
+    ) -> None:
+        query = {"user_id": user_id, "status": "waiting"}
+        if rule_key:
+            query["rule_key"] = rule_key
+        await db.online_matchmaking.delete_many(query)
 
 
 matchmaking = MatchmakingQueue()
@@ -825,7 +882,7 @@ async def ws_endpoint(websocket: WebSocket):
                 elif mtype == "find_match":
                     await _handle_find_match(db, user_id, msg, websocket)
                 elif mtype == "cancel_match":
-                    await matchmaking.remove(user_id)
+                    await matchmaking.remove(db, user_id)
                     await _send(websocket, {"type": "match_cancelled"})
                 elif mtype == "make_move":
                     await _handle_make_move(db, user_id, msg, websocket)
@@ -854,7 +911,7 @@ async def ws_endpoint(websocket: WebSocket):
                 await _send(websocket, {"type": "error", "error": str(e)})
     finally:
         fully_offline = connection_manager.disconnect(user_id, websocket)
-        await matchmaking.remove(user_id)
+        await matchmaking.remove(db, user_id)
         if fully_offline:
             # Mark disconnect time on any active game; abandonment grace 30s
             g = await games.active_for_user(user_id)
@@ -884,7 +941,7 @@ async def _handle_find_match(db, user_id: str, msg: Dict[str, Any], ws: WebSocke
         await _send(ws, {"type": "error", "error": "invalid time control"})
         return
     if await has_ongoing_online_game(db, user_id):
-        await matchmaking.remove(user_id)
+        await matchmaking.remove(db, user_id)
         await _send(ws, {"type": "error", "error": "already in an ongoing game"})
         return
     user = await db.users.find_one({"id": user_id}, {"_id": 0, "name": 1, "elo": 1})
@@ -892,13 +949,13 @@ async def _handle_find_match(db, user_id: str, msg: Dict[str, Any], ws: WebSocke
         await _send(ws, {"type": "error", "error": "user not found"})
         return
     rating = int(user.get("elo", 800))
-    opp = await matchmaking.add_or_pair(user_id, rating, rule_key)
+    opp = await matchmaking.add_or_pair(db, user_id, rating, rule_key, time_control)
     if not opp:
-        await _send(ws, {"type": "searching", "rule_key": rule_key})
+        await _send(ws, {"type": "searching", "rule_key": rule_key, "time_control": time_control})
         return
     if await has_ongoing_online_game(db, user_id) or await has_ongoing_online_game(db, opp["user_id"]):
-        await matchmaking.remove(user_id)
-        await matchmaking.remove(opp["user_id"])
+        await matchmaking.remove(db, user_id)
+        await matchmaking.remove(db, opp["user_id"])
         await _send(ws, {"type": "error", "error": "player already has an ongoing game"})
         return
     # Pair found — randomly assign colors
