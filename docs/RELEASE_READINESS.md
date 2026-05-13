@@ -67,3 +67,9 @@ the app is truly production-ready:
 11. **CI** (GitHub Actions) is not yet configured — the Makefile targets are local-runnable but not pipelined.
 
 Until items 1–3 are complete, this build should be marked **⚠️ Pre-release**, not Production.
+
+## Realtime Multiplayer Status
+
+GitHub Actions is configured, but production GA still needs stronger coverage: frontend unit tests, multi-device E2E matrix, load/perf gates, and freshness checks.
+
+Current multiplayer is a classic-chess MVP suitable for controlled testing. It is not yet production GA because live game state is not deployment-safe across workers/restarts, clocks and draw flows are incomplete, and automated E2E does not yet prove the full two-player game loop. See [REALTIME_PRODUCTION_ROADMAP.md](REALTIME_PRODUCTION_ROADMAP.md).

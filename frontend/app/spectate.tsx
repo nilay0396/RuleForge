@@ -9,6 +9,19 @@ import { RuleChess, type RuleKey } from '../src/engine';
 
 const BACKEND = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
+function spectateWsUrl(gameId: string): string {
+  let base = BACKEND;
+  if (!base && typeof window !== 'undefined' && window.location) {
+    base = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`;
+  } else {
+    base = base.replace(/^http/, 'ws');
+  }
+  if (!base) {
+    base = 'ws://localhost:8001';
+  }
+  return `${base}/api/live/spectate/${encodeURIComponent(gameId)}`;
+}
+
 export default function Spectate() {
   const router = useRouter();
   const { game_id } = useLocalSearchParams<{ game_id: string }>();
@@ -17,6 +30,7 @@ export default function Spectate() {
   const [moves, setMoves] = useState<string[]>([]);
   const [spectators, setSpectators] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [socketError, setSocketError] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
@@ -35,22 +49,43 @@ export default function Spectate() {
       }
     })();
 
-    try {
-      const wsUrl = BACKEND.replace(/^http/, 'ws') + `/api/live/spectate/${encodeURIComponent(game_id)}`;
-      const ws = new WebSocket(wsUrl);
-      wsRef.current = ws;
-      ws.onmessage = (ev) => {
-        try {
-          const msg = JSON.parse(ev.data as string);
-          if (msg.type === 'snapshot') {
-            setFen(msg.fen);
-            setMoves(msg.moves || []);
-          } else if (msg.fen) {
-            setFen(msg.fen);
+    let reconnectTimer: any = null;
+    const connectSpectator = () => {
+      if (stopped) return;
+      try {
+        const ws = new WebSocket(spectateWsUrl(game_id));
+        wsRef.current = ws;
+        ws.onopen = () => setSocketError(null);
+        ws.onmessage = (ev) => {
+          try {
+            const msg = JSON.parse(ev.data as string);
+            setSocketError(null);
+            if (msg.type === 'snapshot') {
+              setFen(msg.fen);
+              setMoves(msg.moves || msg.moves_san || []);
+              if (typeof msg.spectators === 'number') setSpectators(msg.spectators);
+            } else {
+              if (msg.fen) setFen(msg.fen);
+              if (msg.moves || msg.moves_san) setMoves(msg.moves || msg.moves_san || []);
+              if (typeof msg.spectators === 'number') setSpectators(msg.spectators);
+              if (msg.type === 'error') setSocketError(msg.error || msg.message || 'Live update failed.');
+            }
+          } catch {
+            setSocketError('Could not read live update.');
           }
-        } catch {}
-      };
-    } catch {}
+        };
+        ws.onerror = () => setSocketError('Live socket error. Retrying...');
+        ws.onclose = () => {
+          if (stopped) return;
+          setSocketError('Live updates paused. Reconnecting...');
+          reconnectTimer = setTimeout(connectSpectator, 1500);
+        };
+      } catch {
+        setSocketError('Live updates unavailable. Retrying...');
+        reconnectTimer = setTimeout(connectSpectator, 2500);
+      }
+    };
+    connectSpectator();
 
     const t = setInterval(async () => {
       if (stopped) return;
@@ -62,7 +97,12 @@ export default function Spectate() {
       } catch {}
     }, 4000);
 
-    return () => { stopped = true; clearInterval(t); try { wsRef.current?.close(); } catch {} };
+    return () => {
+      stopped = true;
+      clearInterval(t);
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      try { wsRef.current?.close(); } catch {}
+    };
   }, [game_id]);
 
   const rc = useMemo(() => {
@@ -121,6 +161,7 @@ export default function Spectate() {
           <View style={styles.movesCard}>
             <Text style={styles.movesTitle}>Moves · {moves.length}</Text>
             <Text style={styles.movesText} numberOfLines={4}>{moves.join('  ') || 'Game just started.'}</Text>
+            {socketError ? <Text style={styles.liveError}>{socketError}</Text> : null}
           </View>
         </View>
       )}
@@ -144,6 +185,7 @@ const styles = StyleSheet.create({
   movesCard: { padding: spacing.md, backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1, borderRadius: radii.md },
   movesTitle: { color: colors.textPrimary, fontWeight: '900' },
   movesText: { color: colors.textSecondary, marginTop: 6, lineHeight: 19 },
+  liveError: { color: colors.danger, fontSize: 12, fontWeight: '700', marginTop: spacing.sm },
   errorBox: { margin: spacing.xl, padding: spacing.xl, backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1, borderRadius: radii.lg, alignItems: 'center' },
   errorTitle: { color: colors.textPrimary, fontSize: 16, fontWeight: '900' },
   errorSub: { color: colors.textSecondary, marginTop: 6, textAlign: 'center', fontSize: 13 },

@@ -1022,6 +1022,23 @@ async def on_startup():
         await db.users.create_index("id", unique=True)
         await db.rules.create_index("key", unique=True)
         await db.matches.create_index("user_id")
+        await db.online_games.create_index("id", unique=True)
+        await db.online_games.create_index("status")
+        await db.online_games.create_index([("updated_at", -1)])
+        await db.online_games.create_index(
+            [("player_ids", 1)],
+            unique=True,
+            partialFilterExpression={"status": "ongoing", "player_ids": {"$exists": True}},
+        )
+        await db.online_moves.create_index([("game_id", 1), ("created_at", 1)])
+        await db.rating_history.create_index([("user_id", 1), ("created_at", -1)])
+        await db.friends.create_index("id", unique=True)
+        await db.friends.create_index([("user_id", 1), ("friend_id", 1), ("status", 1)])
+        await db.friends.create_index([("friend_id", 1), ("status", 1)])
+        await db.challenges.create_index("id", unique=True)
+        await db.challenges.create_index([("receiver_id", 1), ("status", 1), ("expires_at", 1)])
+        await db.challenges.create_index([("sender_id", 1), ("status", 1), ("created_at", -1)])
+        await db.notifications.create_index([("user_id", 1), ("is_read", 1), ("created_at", -1)])
         await db.daily.create_index("date", unique=True)
         await db.daily_completions.create_index([("user_id", 1), ("date", 1)], unique=True)
     except Exception as e:

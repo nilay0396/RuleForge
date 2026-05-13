@@ -17,6 +17,8 @@ export default function Online() {
   const [searching, setSearching] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [connected, setConnected] = useState(realtime.connected);
+  const [socketError, setSocketError] = useState<string | null>(null);
 
   const loadOnline = async () => {
     try {
@@ -30,25 +32,55 @@ export default function Online() {
     loadOnline().finally(() => setLoading(false));
     realtime.connect();
     const off = realtime.on((m) => {
+      if (m.type === '__connected') {
+        setConnected(true);
+        setSocketError(null);
+      }
+      if (m.type === '__disconnected') {
+        setConnected(false);
+        setSearching(false);
+        setSocketError('Realtime connection lost. Reconnecting...');
+      }
+      if (m.type === '__socket_error') setSocketError('Realtime connection error. Reconnecting...');
       if (m.type === 'presence') setOnline((m.online || []).filter((o: any) => o.id !== user?.id));
-      if (m.type === 'searching') setSearching(true);
-      if (m.type === 'match_cancelled') setSearching(false);
+      if (m.type === 'searching') {
+        setSearching(true);
+        setSocketError(null);
+      }
+      if (m.type === 'match_cancelled') {
+        setSearching(false);
+        setSocketError(null);
+      }
       if (m.type === 'match_found') {
         setSearching(false);
+        setSocketError(null);
         router.replace({ pathname: '/play_online', params: { game_id: m.game_id } });
       }
-      if (m.type === 'error' && searching) setSearching(false);
+      if (m.type === 'error') {
+        setSearching(false);
+        setSocketError(m.error || m.message || 'Realtime command failed.');
+      }
     });
     return () => { off(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const find = () => {
+    if (!connected) {
+      setSocketError('Connect to realtime before finding a match.');
+      return;
+    }
     setSearching(true);
-    realtime.send({ type: 'find_match', rule_key: 'classic' });
+    setSocketError(null);
+    const sent = realtime.send({ type: 'find_match', rule_key: 'classic' });
+    if (!sent.ok) {
+      setSearching(false);
+      setSocketError('Could not start matchmaking because realtime is disconnected.');
+    }
   };
   const cancel = () => {
-    realtime.send({ type: 'cancel_match' });
+    const sent = realtime.send({ type: 'cancel_match' });
+    if (!sent.ok) setSocketError('Could not cancel on the server because realtime is disconnected.');
     setSearching(false);
   };
 
@@ -82,13 +114,15 @@ export default function Online() {
               <ActivityIndicator color={colors.accent} size="large" />
               <Text style={styles.searchingText}>Searching for an opponent…</Text>
               <Text style={styles.muted}>We expand the rating range every second to find you a match.</Text>
+              {socketError ? <Text style={styles.errorText}>{socketError}</Text> : null}
               <Button label="Cancel search" testID="online-cancel" onPress={cancel} variant="secondary" fullWidth />
             </View>
           ) : (
             <View style={{ gap: spacing.md }}>
               <Text style={styles.cardTitle}>Quick match · Classic</Text>
               <Text style={styles.muted}>Paired by ELO (±200, expanding to ±800).</Text>
-              <Button label="Find match" testID="online-find" onPress={find} fullWidth />
+              {socketError ? <Text style={styles.errorText}>{socketError}</Text> : null}
+              <Button label="Find match" testID="online-find" onPress={find} disabled={!connected} fullWidth />
             </View>
           )}
         </View>
@@ -141,6 +175,7 @@ const styles = StyleSheet.create({
   },
   cardTitle: { color: colors.textPrimary, fontSize: 18, fontWeight: '900' },
   muted: { color: colors.textMuted, fontSize: 13 },
+  errorText: { color: colors.danger, fontSize: 13, fontWeight: '700' },
   searchingText: { color: colors.textPrimary, fontSize: 16, fontWeight: '800' },
   sectionTitle: { color: colors.textPrimary, fontSize: 20, fontWeight: '900' },
   sectionSub: { color: colors.textMuted, fontSize: 12, marginTop: 2 },
