@@ -354,12 +354,12 @@ export default function Home() {
           {ruleByKey.classic ? (
             <Pressable
               testID="home-learn-card"
-              onPress={() => router.push({ pathname: '/rule', params: { key: 'classic' } })}
+              onPress={() => router.push('/learn')}
               style={[styles.smallCard]}
             >
               <Text style={styles.smallCardEyebrow}>LEARN</Text>
-              <Text style={styles.smallCardTitle}>Classic chess basics</Text>
-              <Text style={styles.smallCardSub}>Quizzes & lessons</Text>
+              <Text style={styles.smallCardTitle}>Training path</Text>
+              <Text style={styles.smallCardSub}>Guides and quizzes from beginner to advanced</Text>
             </Pressable>
           ) : null}
           {user?.role === 'admin' ? (
