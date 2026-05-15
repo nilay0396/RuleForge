@@ -1030,6 +1030,12 @@ async def on_startup():
             unique=True,
             partialFilterExpression={"status": "ongoing", "player_ids": {"$exists": True}},
         )
+        await db.online_matchmaking.create_index("id", unique=True)
+        await db.online_matchmaking.create_index(
+            [("rule_key", 1), ("time_control", 1), ("status", 1), ("joined_at", 1)]
+        )
+        await db.online_matchmaking.create_index([("user_id", 1), ("status", 1)])
+        await db.online_matchmaking.create_index("expires_at", expireAfterSeconds=0)
         await db.online_moves.create_index([("game_id", 1), ("created_at", 1)])
         await db.rating_history.create_index([("user_id", 1), ("created_at", -1)])
         await db.friends.create_index("id", unique=True)
