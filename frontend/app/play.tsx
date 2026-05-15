@@ -18,7 +18,7 @@ import { colors, radii, ruleColors, spacing } from '../src/theme';
 import Chessboard from '../src/components/Chessboard';
 import Button from '../src/components/Button';
 import { RuleChess, RuleKey, SquareName, LegalTarget } from '../src/engine';
-import { chooseAIMove, AILevel } from '../src/ai';
+import { chooseAIMove, AILevel, getAIProfile } from '../src/ai';
 import { playSound } from '../src/sound';
 
 const TIMER_OPTIONS: { key: string; label: string; seconds: number | null }[] = [
@@ -35,6 +35,7 @@ export default function Play() {
 
   const ruleKey: RuleKey = (params.rule as RuleKey) || 'classic';
   const aiLevel: AILevel = clampLevel(parseInt(params.ai || '2', 10));
+  const aiProfile = getAIProfile(aiLevel);
   const isDaily = params.daily === '1';
 
   const [showRuleModal, setShowRuleModal] = useState(true);
@@ -338,7 +339,7 @@ export default function Play() {
             {ruleKey.toUpperCase().replace('_', ' ')}
           </Text>
           <Text style={styles.title} numberOfLines={1}>
-            vs RuleForge L{aiLevel}
+            vs {aiProfile.name}
           </Text>
         </View>
         <Pressable onPress={() => setShowRuleModal(true)} style={styles.iconBtn} testID="play-rule-info">
@@ -348,11 +349,12 @@ export default function Play() {
 
       {/* Opponent header */}
       <PlayerStrip
-        name="RuleForge AI"
+        name={aiProfile.name}
+        avatar={aiProfile.avatar}
         sub={
           aiThinking
-            ? `Bot · Level ${aiLevel} · thinking...`
-            : `Bot · Level ${aiLevel}`
+            ? `${aiProfile.title} Bot · ${aiProfile.rating} ELO · thinking...`
+            : `${aiProfile.title} Bot · ${aiProfile.rating} ELO`
         }
         time={blackTime}
         active={rcRef.current.turn() === 'b' && !gameOver && !showRuleModal}
@@ -556,6 +558,17 @@ export default function Play() {
             <Text style={[styles.modalEyebrow, { color: accent }]}>{ruleKey.toUpperCase().replace('_', ' ')}</Text>
             <Text style={styles.modalTitle}>{ruleSummary[ruleKey]?.title}</Text>
             <Text style={styles.modalBody}>{ruleSummary[ruleKey]?.body}</Text>
+            <View style={styles.opponentPreview}>
+              <View style={styles.opponentAvatar}>
+                <Text style={styles.opponentAvatarText}>{aiProfile.avatar}</Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.opponentName}>{aiProfile.name}</Text>
+                <Text style={styles.opponentMeta}>
+                  Level {aiProfile.level} · {aiProfile.title} · {aiProfile.rating} ELO
+                </Text>
+              </View>
+            </View>
             <Text style={styles.modalSubhead}>Time control</Text>
             <View style={styles.timerRow}>
               {TIMER_OPTIONS.map((t) => (
@@ -643,6 +656,7 @@ function ActionBtn({
 
 function PlayerStrip({
   name,
+  avatar,
   sub,
   time,
   active,
@@ -650,6 +664,7 @@ function PlayerStrip({
   thinking,
 }: {
   name: string;
+  avatar?: string;
   sub: string;
   time: number | null;
   active: boolean;
@@ -658,7 +673,9 @@ function PlayerStrip({
 }) {
   return (
     <View style={[styles.player, active && { borderColor: colors.accent }]}>
-      <View style={[styles.playerDot, { backgroundColor: active ? colors.accent : colors.border }]} />
+      <View style={[styles.playerAvatar, active && { borderColor: colors.accent }]}>
+        <Text style={styles.playerAvatarText}>{avatar || name.slice(0, 1).toUpperCase()}</Text>
+      </View>
       <View style={{ flex: 1 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
           <Text style={styles.playerName}>{name}</Text>
@@ -688,7 +705,9 @@ function clampLevel(n: number): AILevel {
   if (n <= 1) return 1;
   if (n === 2) return 2;
   if (n === 3) return 3;
-  return 4;
+  if (n === 4) return 4;
+  if (n === 5) return 5;
+  return 6;
 }
 
 function countCaptures(rc: RuleChess, color: 'w' | 'b'): string {
@@ -766,6 +785,17 @@ const styles = StyleSheet.create({
     marginVertical: spacing.xs,
   },
   playerDot: { width: 10, height: 10, borderRadius: 5 },
+  playerAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderColor: colors.border,
+    borderWidth: 1,
+    backgroundColor: colors.elevated,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  playerAvatarText: { color: colors.accent, fontWeight: '900', fontSize: 15 },
   playerName: { color: colors.textPrimary, fontWeight: '800' },
   playerSub: { color: colors.textMuted, fontSize: 12, marginTop: 1 },
   clockBox: {
@@ -845,6 +875,30 @@ const styles = StyleSheet.create({
   modalEyebrow: { fontSize: 11, fontWeight: '900', letterSpacing: 4 },
   modalTitle: { color: colors.textPrimary, fontSize: 24, fontWeight: '900', marginTop: spacing.xs },
   modalBody: { color: colors.textSecondary, marginTop: spacing.sm, lineHeight: 22 },
+  opponentPreview: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    marginTop: spacing.lg,
+    padding: spacing.md,
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: radii.md,
+    backgroundColor: colors.elevated,
+  },
+  opponentAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surface,
+    borderColor: colors.accent,
+    borderWidth: 1,
+  },
+  opponentAvatarText: { color: colors.accent, fontWeight: '900', fontSize: 18 },
+  opponentName: { color: colors.textPrimary, fontWeight: '900', fontSize: 16 },
+  opponentMeta: { color: colors.textSecondary, fontSize: 12, marginTop: 2 },
   modalSubhead: { color: colors.textPrimary, fontSize: 12, fontWeight: '900', letterSpacing: 1, textTransform: 'uppercase', marginTop: spacing.lg },
   modalReward: { color: colors.accent, fontWeight: '700', marginTop: spacing.md },
   timerRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.sm },

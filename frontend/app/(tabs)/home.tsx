@@ -16,6 +16,7 @@ import { api } from '../../src/api';
 import { realtime } from '../../src/ws';
 import { colors, radii, ruleColors, spacing } from '../../src/theme';
 import Button from '../../src/components/Button';
+import { AI_PROFILES, AIProfile } from '../../src/ai';
 
 export default function Home() {
   const { user, refresh } = useAuth();
@@ -202,14 +203,14 @@ export default function Home() {
         <Pressable
           testID="home-quickplay"
           onPress={() =>
-            router.push({ pathname: '/play', params: { rule: 'classic', ai: '2' } })
+            router.push({ pathname: '/play', params: { rule: 'classic', ai: '3' } })
           }
           style={styles.hero}
         >
           <View style={styles.heroLeft}>
             <Text style={styles.heroEyebrow}>QUICK PLAY</Text>
             <Text style={styles.heroTitle}>Play{'\n'}Classic Chess</Text>
-            <Text style={styles.heroSub}>vs RuleForge AI · Silver level</Text>
+            <Text style={styles.heroSub}>vs Rook · Club level</Text>
           </View>
           <View style={styles.heroBoardSet}>
             <Text style={styles.heroPiece}>♜</Text>
@@ -219,6 +220,34 @@ export default function Home() {
             <Text style={[styles.heroPiece, { color: colors.accent }]}>♚</Text>
           </View>
         </Pressable>
+
+        <Section title="AI Opponents" subtitle="Pick a bot level and train at your pace.">
+          <View style={styles.aiGrid}>
+            {(Object.values(AI_PROFILES) as AIProfile[]).map((profile) => (
+              <Pressable
+                key={profile.level}
+                testID={`home-ai-level-${profile.level}`}
+                onPress={() =>
+                  router.push({
+                    pathname: '/play',
+                    params: { rule: 'classic', ai: String(profile.level) },
+                  })
+                }
+                style={styles.aiCard}
+              >
+                <View style={styles.aiAvatar}>
+                  <Text style={styles.aiAvatarText}>{profile.avatar}</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.aiName}>{profile.name}</Text>
+                  <Text style={styles.aiMeta}>
+                    L{profile.level} · {profile.title} · {profile.rating}
+                  </Text>
+                </View>
+              </Pressable>
+            ))}
+          </View>
+        </Section>
 
         <Section title="Puzzles" subtitle="Sharpen your tactics every day.">
           <Pressable
@@ -587,6 +616,30 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   smallCardSub: { color: colors.textSecondary, fontSize: 13, marginTop: 4 },
+  aiGrid: { gap: spacing.sm },
+  aiCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radii.lg,
+    padding: spacing.md,
+  },
+  aiAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.elevated,
+    borderWidth: 1,
+    borderColor: colors.accent,
+  },
+  aiAvatarText: { color: colors.accent, fontSize: 18, fontWeight: '900' },
+  aiName: { color: colors.textPrimary, fontSize: 16, fontWeight: '900' },
+  aiMeta: { color: colors.textSecondary, fontSize: 12, marginTop: 2 },
   badgePill: {
     minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 5,
     backgroundColor: colors.danger, alignItems: 'center', justifyContent: 'center',
