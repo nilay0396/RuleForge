@@ -309,6 +309,15 @@ export default function Home() {
 
         <Section title="More" subtitle="Daily challenges, leaderboard and learn.">
           <Pressable
+            testID="home-couples-game-card"
+            onPress={() => router.push('/couples-game')}
+            style={[styles.smallCard, { borderColor: colors.danger }]}
+          >
+            <Text style={[styles.smallCardEyebrow, { color: colors.danger }]}>PARTY GAME</Text>
+            <Text style={styles.smallCardTitle}>Never Have I Ever 💞</Text>
+            <Text style={styles.smallCardSub}>Impromptu couples game · fresh 10 cards each time</Text>
+          </Pressable>
+          <Pressable
             testID="home-friends-card"
             onPress={() => router.push('/friends')}
             style={[styles.smallCard]}
